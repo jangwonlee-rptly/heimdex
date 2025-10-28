@@ -1,0 +1,59 @@
+[project]
+name = "heimdex-root"
+version = "0.0.0"
+description = "Root repo of Heimdex project."
+requires-python = ">=3.11"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+# Apply to all Python under these roots
+src = ["apps", "packages"]
+line-length = 100
+# Don't lint generated or non-Python areas
+exclude = [
+    ".git",
+    ".venv",
+    "deploy",
+    "docs",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Curated rule set: pyflakes/pycodestyle + isort + some sane extras
+select = [
+  "E", "F", "W",     # pycodestyle/pyflakes
+  "I",               # isort (import sorting)
+  "B",               # flake8-bugbear
+  "UP",              # pyupgrade
+  "C4",              # flake8-comprehensions
+  "SIM",             # flake8-simplify
+  "RUF",             # Ruff rules
+]
+ignore = [
+  # Black handles formatting; keep Ruff from nitpicking long strings/docstrings
+  # (we still keep line-length at 100 for most code)
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["heimdex", "heimdex_common"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_equality = true
+# Early days: don't get blocked by third-party stubs
+ignore_missing_imports = true
+# Keep type-checking out of non-code areas
+exclude = '(^(deploy|docs)/|^\.venv/|/__pycache__/)'

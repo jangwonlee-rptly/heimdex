@@ -1,0 +1,4 @@
+version: "3.9"
+
+# TODO: Define API, worker, database, vector store, and storage services in Micro-Step 0.2.
+services: {}
