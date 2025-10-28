@@ -35,7 +35,20 @@ def _update_job_status(
     result: dict | None = None,
     error: str | None = None,
 ) -> None:
-    """Update job status in database."""
+    """
+    Update a job's status in the database.
+
+    This function constructs and executes a SQL UPDATE statement to modify a job's
+    record. It dynamically builds the SET clause based on the provided arguments.
+
+    Args:
+        job_id: The ID of the job to update.
+        status: The new status of the job.
+        stage: The new processing stage.
+        progress: The new progress percentage.
+        result: A dictionary containing the job's result.
+        error: An error message if the job failed.
+    """
     with get_db() as conn, conn.cursor() as cur:
         updates = ["updated_at = %s"]
         values: list[Any] = [datetime.now(UTC)]
@@ -68,16 +81,19 @@ def _update_job_status(
 @dramatiq.actor(max_retries=3, min_backoff=1000, max_backoff=60000)
 def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
     """
-    Mock multi-stage job processing.
+    Process a mock job with multiple simulated stages.
 
-    Simulates a video processing pipeline with three stages:
-    1. extracting (2 sec) - simulates frame extraction
-    2. analyzing (3 sec) - simulates scene detection
-    3. indexing (1 sec) - simulates vector generation
+    This Dramatiq actor simulates a multi-stage pipeline (extracting, analyzing,
+    indexing) and updates the job's status in the database at each step. It is
+    designed to handle deterministic failures for testing purposes.
 
     Args:
-        job_id: UUID of the job to process
-        fail_at_stage: Optional stage name to trigger deterministic failure for testing
+        job_id: The UUID of the job to process.
+        fail_at_stage: An optional stage name at which to trigger a
+                       deterministic failure for testing the retry mechanism.
+
+    Raises:
+        Exception: If a deterministic failure is triggered.
     """
     log_event("INFO", "job_started", job_id=job_id, fail_at_stage=fail_at_stage)
 

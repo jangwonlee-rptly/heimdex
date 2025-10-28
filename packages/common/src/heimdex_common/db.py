@@ -12,7 +12,16 @@ from psycopg2.extensions import connection as Connection
 
 
 def get_database_url() -> str:
-    """Construct database URL from environment variables."""
+    """
+    Construct the database connection URL from environment variables.
+
+    This function reads database connection details (user, password, host, port,
+    and database name) from environment variables and assembles them into a
+    PostgreSQL connection URL.
+
+    Returns:
+        The full database connection URL.
+    """
     user = os.getenv("PGUSER", "heimdex")
     password = os.getenv("PGPASSWORD", "heimdex")
     host = os.getenv("PGHOST", "localhost")
@@ -22,13 +31,30 @@ def get_database_url() -> str:
 
 
 def get_connection() -> Connection:
-    """Create a new database connection."""
+    """
+    Create a new database connection.
+
+    This function establishes a new connection to the PostgreSQL database using the
+    URL constructed from environment variables.
+
+    Returns:
+        A new database connection object.
+    """
     return psycopg2.connect(get_database_url())
 
 
 @contextmanager
 def get_db() -> Generator[Connection, None, None]:
-    """Context manager for database connections."""
+    """
+    Provide a transactional database connection as a context manager.
+
+    This function yields a database connection that automatically commits on
+    successful exit and rolls back on exceptions, ensuring that the connection
+    is always closed.
+
+    Yields:
+        A database connection object.
+    """
     conn = get_connection()
     try:
         yield conn
@@ -41,7 +67,12 @@ def get_db() -> Generator[Connection, None, None]:
 
 
 def init_db() -> None:
-    """Initialize database schema."""
+    """
+    Initialize the database schema by creating tables and indexes.
+
+    This function executes a SQL script to create the `jobs` table and associated
+    indexes if they do not already exist, ensuring the database is ready for use.
+    """
     schema = """
     CREATE TABLE IF NOT EXISTS jobs (
         id UUID PRIMARY KEY,

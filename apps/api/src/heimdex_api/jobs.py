@@ -26,20 +26,45 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 class JobCreateRequest(BaseModel):
-    """Request to create a new job."""
+    """
+    Defines the request model for creating a new job.
+
+    Attributes:
+        type: The type of job to create. Defaults to "mock_process".
+        fail_at_stage: An optional stage name at which the job should
+                       deterministically fail, for testing purposes.
+    """
 
     type: str = "mock_process"
     fail_at_stage: str | None = None
 
 
 class JobCreateResponse(BaseModel):
-    """Response from creating a job."""
+    """
+    Defines the response model after creating a new job.
+
+    Attributes:
+        job_id: The unique identifier for the newly created job.
+    """
 
     job_id: str
 
 
 class JobStatusResponse(BaseModel):
-    """Job status response."""
+    """
+    Defines the response model for retrieving a job's status.
+
+    Attributes:
+        id: The job's unique identifier.
+        status: The current status of the job (e.g., "pending", "processing",
+                "completed", "failed").
+        stage: The current processing stage, if applicable.
+        progress: The job's progress as a percentage (0-100).
+        result: A dictionary containing the job's output, if completed.
+        error: An error message, if the job failed.
+        created_at: The timestamp when the job was created.
+        updated_at: The timestamp when the job was last updated.
+    """
 
     id: str
     status: str
@@ -53,7 +78,19 @@ class JobStatusResponse(BaseModel):
 
 @router.post("", response_model=JobCreateResponse)
 async def create_job(request: JobCreateRequest) -> JobCreateResponse:
-    """Create a new job and enqueue it for processing."""
+    """
+    Create a new job and enqueue it for background processing.
+
+    This endpoint initiates a new job, records its initial state in the database,
+    and sends a task to the Dramatiq broker for a worker to process.
+
+    Args:
+        request: A `JobCreateRequest` object containing the job type and
+                 optional failure stage for testing.
+
+    Returns:
+        A `JobCreateResponse` object with the newly created job's ID.
+    """
     job_id = str(uuid.uuid4())
 
     # Insert job into database
@@ -82,7 +119,21 @@ async def create_job(request: JobCreateRequest) -> JobCreateResponse:
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
-    """Get the status of a job."""
+    """
+    Retrieve the status of a specific job.
+
+    This endpoint queries the database for a job by its ID and returns its current
+    state, including status, progress, and any results or errors.
+
+    Args:
+        job_id: The UUID of the job to retrieve.
+
+    Returns:
+        A `JobStatusResponse` object with the job's details.
+
+    Raises:
+        HTTPException: If the job with the specified ID is not found.
+    """
     with get_db() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """

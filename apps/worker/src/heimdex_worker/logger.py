@@ -15,6 +15,18 @@ _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
 def _normalize_level(level: str) -> str:
+    """
+    Normalize a log level to a valid, uppercase string.
+
+    If the provided level is not one of the recognized log levels, it defaults
+    to "INFO".
+
+    Args:
+        level: The log level string to normalize.
+
+    Returns:
+        The normalized, uppercase log level.
+    """
     level_upper = level.upper()
     if level_upper not in _VALID_LEVELS:
         return "INFO"
@@ -22,7 +34,18 @@ def _normalize_level(level: str) -> str:
 
 
 def log_event(level: str, msg: str, **fields: Any) -> None:
-    """Emit a single-line JSON log entry."""
+    """
+    Emit a structured, single-line JSON log entry.
+
+    This function constructs a JSON log record containing a timestamp, service
+    information, log level, message, and any additional structured fields.
+
+    Args:
+        level: The severity level of the log (e.g., "INFO", "ERROR").
+        msg: The primary log message.
+        **fields: Arbitrary keyword arguments to be included as structured
+                  fields in the log entry.
+    """
 
     record = {
         "ts": datetime.now(UTC).isoformat(),
