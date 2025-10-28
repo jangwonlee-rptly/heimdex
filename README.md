@@ -11,8 +11,8 @@ Heimdex is a vector-native archival platform built to make massive video librari
 ## Repository Layout
 ```
 apps/
-  api/        # FastAPI application (placeholder)
-  worker/     # Background job runner (placeholder)
+  api/        # FastAPI service scaffolding with /healthz
+  worker/     # Background worker heartbeat process
 packages/
   common/     # Shared models, helpers, and configuration
 deploy/
@@ -47,5 +47,6 @@ Client → FastAPI API → Redis/Dramatiq queue → Worker →
 2. Copy `deploy/.env.example` to `.env` and adjust credentials for your local stack.
 3. Install [pre-commit](https://pre-commit.com) and run `pre-commit install` to enable linting hooks.
 4. Use `make up` to build and start the uv-based API and worker containers, and `make down` to stop them.
+5. Verify the API health endpoint with `make health`; the worker emits JSON heartbeats every ~20 seconds in the logs.
 
 Future steps will introduce service implementations, Docker images, and integration plumbing. For now, this repository provides a clean scaffold to build on.

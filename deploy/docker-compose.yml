@@ -4,9 +4,21 @@ services:
       context: ../apps/api
     env_file:
       - .env
-    command: ["python", "-c", "print('API container started')"]
+    command:
+      - uvicorn
+      - heimdex_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 10s
     networks:
       - heimdex
 
@@ -15,7 +27,15 @@ services:
       context: ../apps/worker
     env_file:
       - .env
-    command: ["python", "-c", "print('Worker container started')"]
+    command: ["python", "-m", "heimdex_worker.main"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 2s
+      retries: 1
     networks:
       - heimdex
 

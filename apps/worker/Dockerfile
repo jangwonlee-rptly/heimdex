@@ -15,10 +15,10 @@ RUN useradd --create-home --shell /usr/sbin/nologin appuser
 WORKDIR /app
 
 COPY --chown=appuser:appuser pyproject.toml ./
-COPY --chown=appuser:appuser heimdex_worker ./heimdex_worker
+COPY --chown=appuser:appuser src ./src
 
 RUN uv pip install --system --no-cache --quiet .
 
 USER appuser
 
-CMD ["python", "-c", "print('Worker ready')"]
+CMD ["python", "-m", "heimdex_worker.main"]

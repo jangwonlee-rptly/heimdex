@@ -14,10 +14,10 @@ RUN useradd --create-home --shell /usr/sbin/nologin appuser
 WORKDIR /app
 
 COPY --chown=appuser:appuser pyproject.toml ./
-COPY --chown=appuser:appuser heimdex_api ./heimdex_api
+COPY --chown=appuser:appuser src ./src
 
 RUN uv pip install --system --no-cache --quiet .
 
 USER appuser
 
-CMD ["python", "-c", "print('API ready')"]
+CMD ["uvicorn", "heimdex_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

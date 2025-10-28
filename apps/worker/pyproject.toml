@@ -1,9 +1,16 @@
 [project]
 name = "heimdex-worker"
-version = "0.0.0"
-description = "Placeholder async worker for Heimdex."
+version = "0.0.1"
+description = "Heimdex worker heartbeat process."
 requires-python = ">=3.11"
+dependencies = []
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

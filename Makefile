@@ -1,4 +1,4 @@
-.PHONY: lint fmt setup up down logs
+.PHONY: lint fmt setup up down logs health
 
 lint:
 	@echo "placeholder for repository linting (ruff, mypy)"
@@ -17,3 +17,6 @@ down:
 
 logs:
 	$(MAKE) -C deploy logs
+
+health:
+	curl -fsS http://localhost:8000/healthz

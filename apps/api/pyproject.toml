@@ -1,9 +1,19 @@
 [project]
 name = "heimdex-api"
-version = "0.0.0"
-description = "Placeholder FastAPI service for Heimdex."
+version = "0.0.1"
+description = "Heimdex API service."
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<0.116.0",
+    "uvicorn[standard]>=0.30.0,<0.31.0",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
