@@ -43,32 +43,76 @@ Client → FastAPI API → Redis/Dramatiq queue → Worker →
 - **Modular services**: Clear separation between API, worker, and shared packages keeps the mono-repo maintainable.
 
 ## Getting Started
-1. Clone the repository and create a Python virtual environment of your choice.
-2. Copy `deploy/.env.example` to `deploy/.env` and adjust credentials for your local stack.
-3. Install [pre-commit](https://pre-commit.com) and run `pre-commit install` to enable linting hooks.
-4. Use `make up` to build and start the services (API, worker, Postgres, Redis).
-5. Verify the API health endpoint with `make health`.
+
+To get the Heimdex platform running locally for development, follow these steps:
+
+1.  **Clone the Repository**:
+    ```bash
+    git clone https://github.com/your-org/heimdex.git
+    cd heimdex
+    ```
+
+2.  **Set Up Environment**:
+    - Create a Python virtual environment using your preferred tool (e.g., `venv`, `conda`).
+    - Copy the example environment file and customize it for your local setup:
+      ```bash
+      cp deploy/.env.example deploy/.env
+      ```
+    - **Note**: The default credentials in `.env.example` are suitable for local development but should be changed for a production environment.
+
+3.  **Install Pre-commit Hooks**:
+    - Install [pre-commit](https://pre-commit.com) to ensure code quality and consistency.
+    - Run the following command to set up the Git hooks:
+      ```bash
+      pre-commit install
+      ```
+
+4.  **Start the Services**:
+    - Use the provided Makefile to build and launch all services with Docker Compose:
+      ```bash
+      make up
+      ```
+    - This command will start the API, worker, Postgres database, and Redis broker.
+
+5.  **Verify the Setup**:
+    - Check that the API is running correctly by hitting the health endpoint:
+      ```bash
+      make health
+      ```
 
 ## Testing the Pipeline
 
-The async job infrastructure is now operational. Test it with these commands:
+The asynchronous job processing pipeline is fully operational. You can test its functionality with the following commands:
 
-```bash
-# Submit a job
-make test-job
+-   **Submit a Job**:
+    ```bash
+    make test-job
+    ```
 
-# Check job status (run multiple times to watch progress)
-make check-job
+-   **Check Job Status**:
+    - Run this command multiple times to observe the job's progress.
+    ```bash
+    make check-job
+    ```
 
-# Test failure and retry behavior
-make test-job-fail
-make check-job  # Wait ~10 seconds, check again to see retries
-```
+-   **Test Failure and Retries**:
+    - This command simulates a failure at the "analyzing" stage.
+    ```bash
+    make test-job-fail
+    ```
+    - Check the job's status again after a few seconds to see the retry mechanism in action.
+    ```bash
+    make check-job
+    ```
 
-Jobs progress through three mock stages simulating video processing:
-- **extracting** (2s): Frame extraction
-- **analyzing** (3s): Scene detection
-- **indexing** (1s): Vector generation
+### Mock Processing Stages
+
+For development and testing, jobs progress through three mock stages that simulate a real video processing pipeline:
+-   **extracting** (2s): Simulates frame extraction.
+-   **analyzing** (3s): Simulates scene detection and analysis.
+-   **indexing** (1s): Simulates vector generation and indexing.
+
+**Note for Production**: These mock stages should be replaced with actual video processing logic (e.g., using FFmpeg, computer vision models) before deploying to a production environment.
 
 See `docs/api.md` for detailed API documentation.
 
