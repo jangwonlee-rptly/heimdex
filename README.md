@@ -44,9 +44,44 @@ Client → FastAPI API → Redis/Dramatiq queue → Worker →
 
 ## Getting Started
 1. Clone the repository and create a Python virtual environment of your choice.
-2. Copy `deploy/.env.example` to `.env` and adjust credentials for your local stack.
+2. Copy `deploy/.env.example` to `deploy/.env` and adjust credentials for your local stack.
 3. Install [pre-commit](https://pre-commit.com) and run `pre-commit install` to enable linting hooks.
-4. Use `make up` to build and start the uv-based API and worker containers, and `make down` to stop them.
-5. Verify the API health endpoint with `make health`; the worker emits JSON heartbeats every ~20 seconds in the logs.
+4. Use `make up` to build and start the services (API, worker, Postgres, Redis).
+5. Verify the API health endpoint with `make health`.
 
-Future steps will introduce service implementations, Docker images, and integration plumbing. For now, this repository provides a clean scaffold to build on.
+## Testing the Pipeline
+
+The async job infrastructure is now operational. Test it with these commands:
+
+```bash
+# Submit a job
+make test-job
+
+# Check job status (run multiple times to watch progress)
+make check-job
+
+# Test failure and retry behavior
+make test-job-fail
+make check-job  # Wait ~10 seconds, check again to see retries
+```
+
+Jobs progress through three mock stages simulating video processing:
+- **extracting** (2s): Frame extraction
+- **analyzing** (3s): Scene detection
+- **indexing** (1s): Vector generation
+
+See `docs/api.md` for detailed API documentation.
+
+## Development Commands
+
+```bash
+make up          # Start all services
+make down        # Stop all services
+make logs        # Tail service logs
+make health      # Check API health
+make reset       # Reset database and Redis (down -v, then up)
+make test-job    # Submit a test job
+make check-job   # Check last job status
+```
+
+Future steps will add real video processing (FFmpeg, scene detection, embeddings) and cloud storage integration.

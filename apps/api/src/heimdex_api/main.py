@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from . import SERVICE_NAME, __version__
+from .jobs import router as jobs_router
 from .logger import log_event
 
 _ENV = os.getenv("HEIMDEX_ENV", "local")
@@ -18,11 +19,16 @@ _STARTED_AT = datetime.now(UTC)
 _STARTED_AT_ISO = _STARTED_AT.isoformat()
 
 app = FastAPI(title="Heimdex API", version=__version__)
+app.include_router(jobs_router)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
     log_event("INFO", "starting", env=_ENV, started_at=_STARTED_AT_ISO)
+    # Initialize database schema
+    from .db_init import main as init_db_schema
+
+    init_db_schema()
 
 
 @app.on_event("shutdown")

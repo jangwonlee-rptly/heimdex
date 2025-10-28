@@ -14,10 +14,16 @@ RUN useradd --create-home --shell /usr/sbin/nologin appuser
 
 WORKDIR /app
 
-COPY --chown=appuser:appuser pyproject.toml ./
-COPY --chown=appuser:appuser src ./src
+# Copy common package first
+COPY --chown=appuser:appuser packages/common /app/packages/common
 
-RUN uv pip install --system --no-cache --quiet .
+# Copy worker app
+COPY --chown=appuser:appuser apps/worker/pyproject.toml ./
+COPY --chown=appuser:appuser apps/worker/src ./src
+
+# Install common package first, then worker
+RUN uv pip install --system --no-cache --quiet /app/packages/common && \
+    uv pip install --system --no-cache --quiet .
 
 USER appuser
 

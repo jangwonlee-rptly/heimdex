@@ -12,6 +12,7 @@ on:
       - "README.md"
       - "docs/**"
       - "**/*.md"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,13 +48,28 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-${{ runner.os }}-py3.11-${{ hashFiles('.pre-commit-config.yaml') }}
           restore-keys: |
+            pre-commit-${{ runner.os }}-py3.11-
             pre-commit-${{ runner.os }}-
 
-      - name: Install tooling
-        run: |
-          uv pip install pre-commit ruff mypy black
+      - name: Install pre-commit
+        run: uv pip install pre-commit
+
+      # Optional: Install mypy dependencies if you have a requirements file
+      # - name: Install project dependencies
+      #   run: uv pip install -r requirements.txt
 
       - name: Run pre-commit
         run: uv run pre-commit run --all-files
+
+  validate-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose definition
+        run: docker compose --env-file deploy/.env.example -f deploy/docker-compose.yml config

@@ -1,9 +1,14 @@
 [project]
 name = "heimdex-worker"
 version = "0.0.1"
-description = "Heimdex worker heartbeat process."
+description = "Heimdex background job processor."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "dramatiq[redis]>=1.17.0,<2.0.0",
+    "psycopg2-binary>=2.9.9,<3.0.0",
+    "redis>=5.0.0,<6.0.0",
+    "heimdex-common",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]
