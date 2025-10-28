@@ -46,6 +46,6 @@ Client → FastAPI API → Redis/Dramatiq queue → Worker →
 1. Clone the repository and create a Python virtual environment of your choice.
 2. Copy `deploy/.env.example` to `.env` and adjust credentials for your local stack.
 3. Install [pre-commit](https://pre-commit.com) and run `pre-commit install` to enable linting hooks.
-4. Use `make up` and `make down` (placeholders for now) to manage infrastructure as it evolves.
+4. Use `make up` to build and start the uv-based API and worker containers, and `make down` to stop them.
 
 Future steps will introduce service implementations, Docker images, and integration plumbing. For now, this repository provides a clean scaffold to build on.
