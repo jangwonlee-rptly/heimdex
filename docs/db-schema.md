@@ -62,32 +62,36 @@ The durable ledger for all asynchronous jobs in the system.
 | id | UUID | NO | gen_random_uuid() | Primary key, globally unique job identifier |
 | org_id | UUID | NO | - | Organization/tenant identifier (for future RLS) |
 | type | VARCHAR(100) | NO | - | Job type discriminator (e.g., 'mock_process', 'drive_ingest') |
-| status | VARCHAR(50) | NO | 'queued' | Current job state (see state machine below) |
+| status | `job_status` ENUM | NO | `'queued'` | Current job state (enum: queued, running, succeeded, failed, canceled, dead_letter) |
 | attempt | INTEGER | NO | 0 | Retry attempt counter (0 = first attempt) |
-| priority | INTEGER | NO | 0 | Job priority (higher = more urgent, for future use) |
+| max_attempts | INTEGER | NO | 5 | Maximum retry attempts before dead-lettering |
+| backoff_policy | `job_backoff_policy` ENUM | NO | `'exp'` | Retry backoff policy (`none`, `fixed`, `exp`) |
+| priority | INTEGER | NO | 0 | Job priority (higher = more urgent, future use) |
 | idempotency_key | VARCHAR(255) | YES | NULL | Client-provided key for deduplication |
 | requested_by | VARCHAR(255) | YES | NULL | User/service that requested the job |
 | created_at | TIMESTAMPTZ | NO | NOW() | Job creation timestamp |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last modification timestamp |
 | started_at | TIMESTAMPTZ | YES | NULL | When job execution started |
 | finished_at | TIMESTAMPTZ | YES | NULL | When job reached terminal state |
-| last_error_code | VARCHAR(100) | YES | NULL | Error classification (e.g., 'TIMEOUT', 'VALIDATION_ERROR') |
-| last_error_message | TEXT | YES | NULL | Human-readable error detail |
+| last_error_code | VARCHAR(64) | YES | NULL | Error classification (e.g., 'TIMEOUT', 'VALIDATION_ERROR') |
+| last_error_message | VARCHAR(2048) | YES | NULL | Human-readable error detail (truncated in repository layer) |
 
 #### Constraints
 
 - **Primary Key**: `id`
-- **Unique**: `(org_id, idempotency_key)` WHERE idempotency_key IS NOT NULL
-- **Check**: `status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'dead_letter')`
+- **Partial Unique Index**: `idx_job__org_id_idempotency_key` on `(org_id, idempotency_key)` WHERE `idempotency_key IS NOT NULL`
+- **Status Enum**: enforced by `job_status` PostgreSQL enum
+- **Finished Timestamp Check**: `ck_job__status_finished_at_consistency` enforces `finished_at` is set only for terminal states
 
 #### Indexes
 
 | Name | Columns | Type | Purpose |
 |------|---------|------|---------|
 | pk_job | id | PRIMARY KEY | Fast lookups by job ID |
-| idx_job_org_status | (org_id, status, created_at DESC) | BTREE | Org-scoped queue/status queries |
-| idx_job_idempotency | (org_id, idempotency_key) | BTREE | Deduplication lookups |
-| idx_job_type_status | (type, status) | BTREE | Job type monitoring |
+| idx_job__job_org_id | (org_id) | BTREE | Fast lookups by tenant |
+| idx_job__org_id_created_at_desc | (org_id, created_at DESC) | BTREE | Org-scoped chronological queries |
+| idx_job__org_id_idempotency_key | (org_id, idempotency_key) WHERE `idempotency_key IS NOT NULL` | PARTIAL BTREE | Deduplication lookups |
+| idx_job__status_created_at | (status, created_at) | BTREE | Operational monitoring by status |
 
 #### State Machine
 
@@ -156,8 +160,8 @@ Immutable audit log of all job state transitions.
 | Name | Columns | Type | Purpose |
 |------|---------|------|---------|
 | pk_job_event | id | PRIMARY KEY | Fast lookups by event ID |
-| idx_job_event_job_ts | (job_id, ts DESC) | BTREE | Job timeline queries |
-| idx_job_event_ts | (ts DESC) | BTREE | Chronological event queries |
+| idx_job_event__job_id_ts | (job_id, ts) | BTREE | Job timeline queries |
+| idx_job_event__ts | (ts) | BTREE | Chronological event queries |
 
 #### Rationale
 

@@ -4,25 +4,57 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import Enum
 
 from sqlalchemy import (
     TIMESTAMP,
     CheckConstraint,
+    Enum as SAEnum,
     ForeignKey,
     Index,
     Integer,
+    MetaData,
     String,
-    Text,
+    desc,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+metadata_obj = MetaData(
+    naming_convention={
+        "ix": "idx_%(table_name)s__%(column_0_label)s",
+        "uq": "uq_%(table_name)s__%(column_0_name)s",
+        "ck": "ck_%(table_name)s__%(constraint_name)s",
+        "fk": "fk_%(table_name)s__%(referred_table_name)s",
+        "pk": "pk_%(table_name)s",
+    }
+)
+
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
-    pass
+    metadata = metadata_obj
+
+
+class JobStatus(str, Enum):
+    """Allowed job status values."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    DEAD_LETTER = "dead_letter"
+
+
+class BackoffPolicy(str, Enum):
+    """Backoff policies for retry scheduling."""
+
+    NONE = "none"
+    FIXED = "fixed"
+    EXPONENTIAL = "exp"
 
 
 class Job(Base):
@@ -60,10 +92,14 @@ class Job(Base):
     )
 
     # State & control
-    status: Mapped[str] = mapped_column(
-        String(50),
+    status: Mapped[JobStatus] = mapped_column(
+        SAEnum(
+            JobStatus,
+            name="job_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         nullable=False,
-        default="queued",
+        default=JobStatus.QUEUED,
         server_default=text("'queued'"),
         comment="Current job state",
     )
@@ -73,6 +109,24 @@ class Job(Base):
         default=0,
         server_default=text("0"),
         comment="Retry attempt counter (0 = first attempt)",
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=5,
+        server_default=text("5"),
+        comment="Maximum retry attempts before dead-lettering",
+    )
+    backoff_policy: Mapped[BackoffPolicy] = mapped_column(
+        SAEnum(
+            BackoffPolicy,
+            name="job_backoff_policy",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=BackoffPolicy.EXPONENTIAL,
+        server_default=text("'exp'"),
+        comment="Backoff policy for retry scheduling",
     )
     priority: Mapped[int] = mapped_column(
         Integer,
@@ -121,12 +175,12 @@ class Job(Base):
 
     # Error tracking
     last_error_code: Mapped[str | None] = mapped_column(
-        String(100),
+        String(64),
         nullable=True,
         comment="Error classification (e.g., 'TIMEOUT', 'VALIDATION_ERROR')",
     )
     last_error_message: Mapped[str | None] = mapped_column(
-        Text,
+        String(2048),
         nullable=True,
         comment="Human-readable error detail",
     )
@@ -144,21 +198,23 @@ class Job(Base):
         # Idempotency constraint (org_id + idempotency_key unique when key is not null)
         # Using Index with unique=True for partial unique constraint support
         Index(
-            "uq_job_org_idempotency",
+            "idx_job__org_id_idempotency_key",
             "org_id",
             "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
-        # Status enum constraint
+        # Composite index for org-scoped chronological queries
+        Index("idx_job__org_id_created_at_desc", "org_id", desc("created_at")),
+        # Index for status monitoring
+        Index("idx_job__status_created_at", "status", "created_at"),
+        # Ensure finished_at is populated for terminal states only
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'dead_letter')",
-            name="ck_job_status",
+            "((status IN ('succeeded', 'failed', 'canceled', 'dead_letter') "
+            "AND finished_at IS NOT NULL) OR "
+            "(status IN ('queued', 'running') AND finished_at IS NULL))",
+            name="status_finished_at_consistency",
         ),
-        # Composite index for org-scoped queue queries (hot path)
-        Index("idx_job_org_status", "org_id", "status", "created_at"),
-        # Index for job type monitoring
-        Index("idx_job_type_status", "type", "status"),
         {"comment": "Durable ledger for asynchronous jobs with retry and idempotency support"},
     )
 
@@ -221,9 +277,9 @@ class JobEvent(Base):
     # Table-level constraints and indexes
     __table_args__ = (
         # Index for job timeline queries (hot path)
-        Index("idx_job_event_job_ts", "job_id", "ts"),
+        Index("idx_job_event__job_id_ts", "job_id", "ts"),
         # Index for chronological queries
-        Index("idx_job_event_ts", "ts"),
+        Index("idx_job_event__ts", "ts"),
         {
             "comment": "Immutable audit log of job state transitions",
         },

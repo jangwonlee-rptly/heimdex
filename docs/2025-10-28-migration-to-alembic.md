@@ -117,6 +117,8 @@ make readyz            # Check API readiness
 
 ## Manual Testing Guide
 
+> ℹ️ See `docs/TESTING_MIGRATIONS.md` for a reusable container workflow (autogenerate → curate → upgrade → compile SQL).
+
 ### Prerequisites
 
 1. **Docker Desktop running**

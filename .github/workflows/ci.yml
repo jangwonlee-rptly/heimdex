@@ -76,3 +76,58 @@ jobs:
 
       - name: Validate Docker Compose definition
         run: docker compose -f deploy/docker-compose.yml config
+
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare environment file
+        run: cp deploy/.env.example deploy/.env
+
+      - name: Build and start services
+        run: docker compose -f deploy/docker-compose.yml up -d --build pg redis api
+
+      - name: Wait for Postgres
+        run: |
+          docker compose -f deploy/docker-compose.yml exec pg bash -lc 'for i in {1..30}; do pg_isready -U "${PGUSER:-heimdex}" && exit 0; sleep 2; done; exit 1'
+
+      - name: Alembic upgrade head (fresh install)
+        run: |
+          docker compose -f deploy/docker-compose.yml exec -u appuser api bash -lc '\
+            cd /app/packages/common && \
+            ALEMBIC_CONFIG=/app/packages/common/alembic.ini \
+            PYTHONPATH=/app/packages/common/src \
+            python -m alembic upgrade head'
+
+      - name: Alembic downgrade to previous revision
+        run: |
+          docker compose -f deploy/docker-compose.yml exec -u appuser api bash -lc '\
+            cd /app/packages/common && \
+            ALEMBIC_CONFIG=/app/packages/common/alembic.ini \
+            PYTHONPATH=/app/packages/common/src \
+            python -m alembic downgrade 001_job_ledger_init'
+
+      - name: Alembic upgrade head (upgrade path)
+        run: |
+          docker compose -f deploy/docker-compose.yml exec -u appuser api bash -lc '\
+            cd /app/packages/common && \
+            ALEMBIC_CONFIG=/app/packages/common/alembic.ini \
+            PYTHONPATH=/app/packages/common/src \
+            python -m alembic upgrade head'
+
+      - name: Compile migration SQL (smoke test)
+        run: |
+          docker compose -f deploy/docker-compose.yml exec -u appuser api bash -lc '\
+            cd /app/packages/common && \
+            ALEMBIC_CONFIG=/app/packages/common/alembic.ini \
+            PYTHONPATH=/app/packages/common/src \
+            python -m alembic upgrade 001_job_ledger_init:3af4686817cc --sql > /tmp/ci_migration.sql'
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v

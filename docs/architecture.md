@@ -37,14 +37,16 @@ Heimdex uses **Dramatiq** with Redis as the message broker to handle long-runnin
 - `id` (UUID): Globally unique job identifier
 - `org_id` (UUID): Organization/tenant identifier (for RLS in Supabase)
 - `type` (VARCHAR): Job type discriminator (`mock_process`, `drive_ingest`, etc.)
-- `status` (VARCHAR): `queued` | `running` | `succeeded` | `failed` | `canceled` | `dead_letter`
-- `attempt` (INTEGER): Retry attempt counter (0 = first attempt)
+- `status` (`job_status` ENUM): `queued` | `running` | `succeeded` | `failed` | `canceled` | `dead_letter`
+- `attempt` / `max_attempts` (INTEGER): Current retry count vs. retry budget before dead-lettering
+- `backoff_policy` (`job_backoff_policy` ENUM): Retry policy (`none`, `fixed`, `exp`)
 - `priority` (INTEGER): Job priority (higher = more urgent, future use)
-- `idempotency_key` (VARCHAR): Client-provided key for deduplication
+- `idempotency_key` (VARCHAR): Client-provided key for deduplication (partial unique index on `(org_id, idempotency_key)` where non-null)
 - `requested_by` (VARCHAR): User/service that requested the job
 - `created_at`, `updated_at`, `started_at`, `finished_at` (TIMESTAMPTZ): Lifecycle timestamps
-- `last_error_code` (VARCHAR): Error classification (`TIMEOUT`, `VALIDATION_ERROR`, etc.)
-- `last_error_message` (TEXT): Human-readable error detail
+- `last_error_code` (VARCHAR(64)): Error classification (`TIMEOUT`, `VALIDATION_ERROR`, etc.)
+- `last_error_message` (VARCHAR(2048)): Human-readable error detail (truncated on write)
+- `ck_job__status_finished_at_consistency`: Enforces `finished_at` is present only for terminal states (`succeeded`, `failed`, `canceled`, `dead_letter`)
 
 **`job_event` table** (immutable audit log):
 - `id` (UUID): Unique event identifier

@@ -165,7 +165,8 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
             "canceled": "canceled",
             "dead_letter": "failed",
         }
-        status = status_mapping.get(job.status, job.status)
+        raw_status = job.status.value if hasattr(job.status, "value") else job.status
+        status = status_mapping.get(raw_status, raw_status)
 
         return JobStatusResponse(
             id=str(job.id),

@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Job, JobEvent
+from ..models import Job, JobEvent, JobStatus
 
 
 class JobRepository:
@@ -58,7 +58,7 @@ class JobRepository:
             id=uuid.uuid4(),
             org_id=org_id,
             type=job_type,
-            status="queued",
+            status=JobStatus.QUEUED,
             attempt=0,
             priority=priority,
             idempotency_key=idempotency_key,
@@ -73,7 +73,7 @@ class JobRepository:
         self.log_job_event(
             job_id=job.id,
             prev_status=None,
-            next_status="queued",
+            next_status=JobStatus.QUEUED.value,
             detail_json=None,
         )
 
@@ -155,14 +155,16 @@ class JobRepository:
             raise ValueError(f"Job {job_id} not found")
 
         prev_status = job.status
+        status_enum: JobStatus | None = None
 
         # Update job fields
         if status is not None:
-            job.status = status
+            status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
+            job.status = status_enum
         if last_error_code is not None:
             job.last_error_code = last_error_code
         if last_error_message is not None:
-            job.last_error_message = last_error_message
+            job.last_error_message = last_error_message[:2048]
         if started_at is not None:
             job.started_at = started_at
         if finished_at is not None:
@@ -174,11 +176,13 @@ class JobRepository:
         self.session.flush()
 
         # Log event if status changed and logging enabled
-        if log_event and status is not None and prev_status != status:
+        if log_event and status_enum is not None and prev_status != status_enum:
             self.log_job_event(
                 job_id=job_id,
-                prev_status=prev_status,
-                next_status=status,
+                prev_status=(
+                    prev_status.value if isinstance(prev_status, JobStatus) else prev_status
+                ),
+                next_status=status_enum.value,
                 detail_json=event_detail,
             )
 
@@ -222,18 +226,27 @@ class JobRepository:
         if result is not None:
             event_detail["result"] = result
 
+        status_enum = None
+        if status is not None:
+            status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
+
         # Set timestamps based on status transitions
         started_at = None
         finished_at = None
-        if status == "running" and job.status != "running":
+        if status_enum == JobStatus.RUNNING and job.status != JobStatus.RUNNING:
             started_at = datetime.now(UTC)
-        if status in ("succeeded", "failed", "canceled", "dead_letter"):
+        if status_enum in {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+            JobStatus.DEAD_LETTER,
+        }:
             finished_at = datetime.now(UTC)
 
         # Update job
         self.update_job_status(
             job_id=job_id,
-            status=status,
+            status=status_enum.value if status_enum is not None else None,
             last_error_message=error,
             started_at=started_at,
             finished_at=finished_at,
@@ -291,7 +304,7 @@ class JobRepository:
         """
         stmt = (
             select(Job)
-            .where(Job.org_id == org_id, Job.status == "queued")
+            .where(Job.org_id == org_id, Job.status == JobStatus.QUEUED)
             .order_by(desc(Job.priority), Job.created_at)
             .limit(limit)
         )
@@ -318,9 +331,10 @@ class JobRepository:
         Returns:
             List of Job instances with the specified status
         """
+        status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
         stmt = (
             select(Job)
-            .where(Job.org_id == org_id, Job.status == status)
+            .where(Job.org_id == org_id, Job.status == status_enum)
             .order_by(desc(Job.created_at))
             .limit(limit)
         )
@@ -341,7 +355,10 @@ class JobRepository:
         )
         results = self.session.execute(stmt).all()
 
-        return {row[0]: row[1] for row in results}
+        return {
+            (status.value if isinstance(status, JobStatus) else status): count
+            for status, count in results
+        }
 
     def increment_attempt(self, job_id: uuid.UUID) -> None:
         """
