@@ -60,6 +60,36 @@ postgresql+psycopg2://heimdex:***@pg:5432/heimdex
 
 **Note**: For local development with the GCS emulator, set `STORAGE_EMULATOR_HOST=gcs:4443` to bypass authentication.
 
+### Dependency Enablement (Profile-Aware Readiness)
+
+These flags control which dependencies are checked during readiness probes. Disabled dependencies are skipped and don't affect readiness status.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ENABLE_PG` | bool | `true` | Enable PostgreSQL readiness check |
+| `ENABLE_REDIS` | bool | `true` | Enable Redis readiness check |
+| `ENABLE_QDRANT` | bool | `false` | Enable Qdrant readiness check (disabled by default) |
+| `ENABLE_GCS` | bool | `false` | Enable GCS readiness check (disabled by default) |
+
+**Current Environment**: With the default flags, only PostgreSQL and Redis affect readiness. Qdrant and GCS are disabled because they're not yet part of the deployment.
+
+**Use Case**: Set `ENABLE_QDRANT=true` when you add Qdrant to docker-compose. Set `ENABLE_GCS=true` when you add GCS/storage.
+
+### Probe Tunables
+
+These settings control the behavior of dependency health probes.
+
+| Variable | Type | Default | Range | Description |
+|----------|------|---------|-------|-------------|
+| `PROBE_TIMEOUT_MS` | int | `300` | 50-5000 | Per-attempt timeout in milliseconds |
+| `PROBE_RETRIES` | int | `2` | 0-5 | Number of retry attempts on failure |
+| `PROBE_COOLDOWN_SEC` | int | `30` | 5-300 | Cooldown period after failure (seconds) |
+| `PROBE_CACHE_SEC` | int | `10` | 1-60 | Cache duration for successful probes (seconds) |
+
+**Performance**: Tight defaults (300ms timeout, 2 retries) ensure fast failure detection. Typical healthy probe completes in <200ms.
+
+**Caching**: Successful probes are cached for 10s, failed probes trigger a 30s cooldown to prevent probe storms.
+
 ---
 
 ## Configuration Files
@@ -95,6 +125,18 @@ GCS_BUCKET=heimdex-dev
 GCS_PROJECT_ID=heimdex-local
 GCS_USE_SSL=false
 STORAGE_EMULATOR_HOST=gcs:4443
+
+# Dependency enablement (profile-aware readiness)
+ENABLE_PG=true
+ENABLE_REDIS=true
+ENABLE_QDRANT=false
+ENABLE_GCS=false
+
+# Probe tunables
+PROBE_TIMEOUT_MS=300
+PROBE_RETRIES=2
+PROBE_COOLDOWN_SEC=30
+PROBE_CACHE_SEC=10
 ```
 
 ### Production: Environment Variables

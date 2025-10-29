@@ -111,28 +111,22 @@ async def healthz() -> JSONResponse:
 @app.get("/readyz", response_class=JSONResponse)
 async def readyz() -> JSONResponse:
     """
-    Perform a readiness check with dependency probes.
+    Perform a profile-aware readiness check with dependency probes.
 
-    This endpoint probes all critical dependencies (PostgreSQL, Redis, Qdrant, GCS)
+    This endpoint probes only enabled dependencies (configured via ENABLE_* flags)
     and returns their status with timing information. The service is considered ready
-    only if all dependencies are reachable.
+    only if all enabled dependencies are reachable.
+
+    Disabled dependencies (e.g., Qdrant, GCS) are skipped and don't affect readiness.
 
     Returns:
-        A JSON response with dependency status and overall readiness.
-        Returns HTTP 503 if any dependency is down.
+        A JSON response with uniform structure:
+        - service, env, version, ready, summary
+        - deps: per-dependency results with enabled/skipped/ok/latency_ms/attempts/reason
+        Returns HTTP 503 if any enabled dependency is down.
     """
-    from heimdex_common.probes import is_ready, probe_all_dependencies
+    from heimdex_common.probes import check_readiness
 
-    probes = probe_all_dependencies(timeout_ms=1000)
-    ready = is_ready(probes)
-
-    payload = {
-        "ok": ready,
-        "service": SERVICE_NAME,
-        "version": __version__,
-        "env": _ENV,
-        **probes,
-    }
-
-    status_code = 200 if ready else 503
-    return JSONResponse(content=payload, status_code=status_code)
+    result = check_readiness(service=SERVICE_NAME, version=__version__)
+    status_code = 200 if result["ready"] else 503
+    return JSONResponse(content=result, status_code=status_code)

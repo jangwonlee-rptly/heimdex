@@ -76,72 +76,160 @@ After exhausting retries, jobs move to Redis dead-letter queue for manual inspec
 - Always returns HTTP 200 if process is alive
 - No dependency checks (fast, non-blocking)
 
-**`/readyz`**: Comprehensive readiness check with dependency probes
-- Probes all critical dependencies: PostgreSQL, Redis, Qdrant, GCS
-- Returns HTTP 200 if all deps are healthy, HTTP 503 otherwise
-- Includes per-dependency timing (milliseconds)
+**`/readyz`**: Profile-aware readiness check with dependency probes
+- Probes **only enabled dependencies** (configured via `ENABLE_*` flags)
+- Disabled dependencies are skipped and don't affect readiness
+- Returns HTTP 200 if all enabled deps are healthy, HTTP 503 otherwise
+- Includes per-dependency timing, retry counts, and failure reasons
 - Used by orchestrators (k8s, Cloud Run) to route traffic
+
+### Profile-Aware Behavior
+
+**Current Compose Environment** (default flags):
+- **Enabled**: PostgreSQL, Redis → affect readiness
+- **Disabled**: Qdrant, GCS → skipped (not yet deployed)
+
+When you add Qdrant to docker-compose (micro-step 0.8), set `ENABLE_QDRANT=true` to include it in readiness checks.
+
+**Why Profile-Aware?**
+- Prevents false negatives (no "503" errors for services that don't exist yet)
+- Clean switch pattern: add service → flip flag → redeploy
+- No code changes needed when adding dependencies
 
 ### Probe Semantics
 
-Each probe:
+Each enabled probe:
 1. Performs a shallow health check (e.g., `SELECT 1` for PostgreSQL, `PING` for Redis)
-2. Enforces a short timeout (default: 1000ms, GCS gets 2000ms for cold start)
-3. Returns `{ok: bool, ms: float, error: string | null}`
+2. Enforces a tight per-attempt timeout (default: 300ms)
+3. Retries with jittered exponential backoff (default: 2 retries, 100-200ms backoff)
+4. Caches successful results (10s) and failed results (30s cooldown) to prevent probe storms
+5. Returns uniform structure:
+   ```
+   {
+     enabled: bool,
+     skipped: bool,
+     ok: bool | null,
+     latency_ms: float | null,
+     attempts: int,
+     reason: string | null
+   }
+   ```
 
 **Failure Modes**:
 - **Connection refused**: Dependency not reachable (wrong hostname, service down)
 - **Timeout**: Dependency slow/overloaded (probe timeout exceeded)
 - **Auth error**: Credentials invalid (check env vars)
+- **Disabled**: Dependency not enabled (skipped, doesn't affect readiness)
 
-### Readiness Response Example
+### Readiness Response Examples
 
+**Minimal Profile** (current: PG + Redis only):
 ```json
 {
-  "ok": true,
-  "service": "heimdex-api",
-  "version": "0.0.0",
+  "service": "api",
   "env": "local",
+  "version": "0.0.0",
+  "ready": true,
+  "summary": "ok",
   "deps": {
-    "pg": {"ok": true, "ms": 12.34, "error": null},
-    "redis": {"ok": true, "ms": 5.67, "error": null},
-    "qdrant": {"ok": true, "ms": 18.92, "error": null},
-    "gcs": {"ok": true, "ms": 45.23, "error": null}
+    "pg": {
+      "enabled": true,
+      "skipped": false,
+      "ok": true,
+      "latency_ms": 2.1,
+      "attempts": 1,
+      "reason": null
+    },
+    "redis": {
+      "enabled": true,
+      "skipped": false,
+      "ok": true,
+      "latency_ms": 0.8,
+      "attempts": 1,
+      "reason": null
+    },
+    "qdrant": {
+      "enabled": false,
+      "skipped": true,
+      "ok": null,
+      "latency_ms": null,
+      "attempts": 0,
+      "reason": "disabled"
+    },
+    "gcs": {
+      "enabled": false,
+      "skipped": true,
+      "ok": null,
+      "latency_ms": null,
+      "attempts": 0,
+      "reason": "disabled"
+    }
+  }
+}
+```
+→ Returns **HTTP 200 OK** (only PG and Redis checked)
+
+**Full Profile** (future: all deps enabled):
+```json
+{
+  "service": "api",
+  "env": "local",
+  "version": "0.0.0",
+  "ready": true,
+  "summary": "ok",
+  "deps": {
+    "pg": {"enabled": true, "skipped": false, "ok": true, "latency_ms": 2.1, "attempts": 1, "reason": null},
+    "redis": {"enabled": true, "skipped": false, "ok": true, "latency_ms": 0.8, "attempts": 1, "reason": null},
+    "qdrant": {"enabled": true, "skipped": false, "ok": true, "latency_ms": 15.3, "attempts": 1, "reason": null},
+    "gcs": {"enabled": true, "skipped": false, "ok": true, "latency_ms": 42.7, "attempts": 1, "reason": null}
   }
 }
 ```
 
-If any dependency fails:
+**Failure Example** (Redis down):
 ```json
 {
-  "ok": false,
-  "service": "heimdex-api",
-  "version": "0.0.0",
+  "service": "api",
   "env": "local",
+  "version": "0.0.0",
+  "ready": false,
+  "summary": "down",
   "deps": {
-    "pg": {"ok": false, "ms": 1003.45, "error": "connection timeout"},
-    "redis": {"ok": true, "ms": 5.67, "error": null},
-    "qdrant": {"ok": true, "ms": 18.92, "error": null},
-    "gcs": {"ok": true, "ms": 45.23, "error": null}
+    "pg": {"enabled": true, "skipped": false, "ok": true, "latency_ms": 2.1, "attempts": 1, "reason": null},
+    "redis": {
+      "enabled": true,
+      "skipped": false,
+      "ok": false,
+      "latency_ms": 300.4,
+      "attempts": 3,
+      "reason": "timeout"
+    },
+    "qdrant": {"enabled": false, "skipped": true, "ok": null, "latency_ms": null, "attempts": 0, "reason": "disabled"},
+    "gcs": {"enabled": false, "skipped": true, "ok": null, "latency_ms": null, "attempts": 0, "reason": "disabled"}
   }
 }
 ```
 → Returns **HTTP 503 Service Unavailable**
 
-### Timeout Strategy
+### Probe Tunables
 
-| Dependency | Timeout | Rationale |
-|------------|---------|-----------|
-| PostgreSQL | 1000ms | Low latency expected for local connections |
-| Redis | 1000ms | In-memory, should respond instantly |
-| Qdrant | 1000ms | HTTP API, fast response expected |
-| GCS | 2000ms | Emulator may have cold-start delay |
+| Setting | Default | Range | Description |
+|---------|---------|-------|-------------|
+| `PROBE_TIMEOUT_MS` | 300 | 50-5000 | Per-attempt timeout (milliseconds) |
+| `PROBE_RETRIES` | 2 | 0-5 | Number of retry attempts |
+| `PROBE_COOLDOWN_SEC` | 30 | 5-300 | Cooldown after failure (seconds) |
+| `PROBE_CACHE_SEC` | 10 | 1-60 | Cache duration for success (seconds) |
+
+**Performance**: Tight defaults ensure fast failure detection. Typical healthy probe: <200ms total (including all retries).
+
+**Caching**: Prevents probe storms by caching results. Successful probes cached for 10s, failed probes trigger 30s cooldown.
 
 ### Usage
 
 - **Orchestration**: Configure k8s/Cloud Run readiness probes to poll `/readyz`
-- **Manual debugging**: `make readyz` (formatted JSON output)
+- **Manual debugging**: `curl http://localhost:8000/readyz | jq`
 - **CI/CD**: Healthcheck script before running integration tests
+- **Add new dependency**: Set `ENABLE_<DEP>=true` in `.env`, restart services
 
 ## Health & Operations
 

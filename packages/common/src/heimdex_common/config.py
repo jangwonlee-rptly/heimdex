@@ -103,12 +103,96 @@ class HeimdexConfig(BaseSettings):
         description="Path to GCS service account JSON",
     )
 
+    # Dependency enablement flags (profile-aware readiness)
+    enable_pg: bool = Field(
+        default=True,
+        alias="ENABLE_PG",
+        description="Enable PostgreSQL dependency check",
+    )
+    enable_redis: bool = Field(
+        default=True,
+        alias="ENABLE_REDIS",
+        description="Enable Redis dependency check",
+    )
+    enable_qdrant: bool = Field(
+        default=False,
+        alias="ENABLE_QDRANT",
+        description="Enable Qdrant dependency check",
+    )
+    enable_gcs: bool = Field(
+        default=False,
+        alias="ENABLE_GCS",
+        description="Enable GCS dependency check",
+    )
+
+    # Probe tunables
+    probe_timeout_ms: int = Field(
+        default=300,
+        alias="PROBE_TIMEOUT_MS",
+        description="Probe timeout in milliseconds",
+    )
+    probe_retries: int = Field(
+        default=2,
+        alias="PROBE_RETRIES",
+        description="Number of probe retries",
+    )
+    probe_cooldown_sec: int = Field(
+        default=30,
+        alias="PROBE_COOLDOWN_SEC",
+        description="Cooldown period for failed probes (seconds)",
+    )
+    probe_cache_sec: int = Field(
+        default=10,
+        alias="PROBE_CACHE_SEC",
+        description="Cache duration for successful probes (seconds)",
+    )
+
     @field_validator("pgport")
     @classmethod
     def validate_pgport(cls, v: int) -> int:
         """Ensure PostgreSQL port is in valid range."""
         if not (1 <= v <= 65535):
             raise ValueError(f"Invalid PostgreSQL port: {v} (must be 1-65535)")
+        return v
+
+    @field_validator("probe_timeout_ms")
+    @classmethod
+    def validate_probe_timeout(cls, v: int) -> int:
+        """Clamp probe timeout to reasonable range (50-5000ms)."""
+        if v < 50:
+            return 50
+        if v > 5000:
+            return 5000
+        return v
+
+    @field_validator("probe_retries")
+    @classmethod
+    def validate_probe_retries(cls, v: int) -> int:
+        """Clamp probe retries to reasonable range (0-5)."""
+        if v < 0:
+            return 0
+        if v > 5:
+            return 5
+        return v
+
+    @field_validator("probe_cooldown_sec")
+    @classmethod
+    def validate_probe_cooldown(cls, v: int) -> int:
+        """Clamp probe cooldown to reasonable range (5-300s)."""
+        if v < 5:
+            return 5
+        if v > 300:
+            return 300
+        return v
+
+    @field_validator("probe_cache_sec")
+    @classmethod
+    def validate_probe_cache(cls, v: int) -> int:
+        """Clamp probe cache to reasonable range (1-60s)."""
+        if v < 1:
+            return 1
+        if v > 60:
+            return 60
         return v
 
     def get_database_url(self, driver: str = "postgresql+psycopg2") -> str:
