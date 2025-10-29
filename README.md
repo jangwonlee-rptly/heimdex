@@ -38,9 +38,18 @@ Client → FastAPI API → Redis/Dramatiq queue → Worker →
 ```
 
 ## Development Philosophy
-- **Infrastructure as code**: Docker Compose, Makefiles, and CI/CD workflows ensure reproducible environments.
-- **Lint-first**: Ruff, Black, and MyPy run via pre-commit to keep the codebase healthy from the start.
-- **Modular services**: Clear separation between API, worker, and shared packages keeps the mono-repo maintainable.
+
+Heimdex is built on a set of core principles that guide our technical decisions and long-term vision:
+
+-   **Vector-Native First**: We believe that vector search is the future of data retrieval for unstructured and semi-structured data. Our architecture prioritizes a vector-native approach, ensuring that embeddings and semantic search are foundational, not an afterthought.
+
+-   **Extensible and Modular**: The platform is designed as a collection of modular services that communicate through well-defined APIs and message queues. This allows for independent scaling, development, and the flexibility to swap out components (e.g., different AI models, storage backends) as technology evolves.
+
+-   **Infrastructure as Code (IaC)**: All infrastructure is defined declaratively using tools like Docker Compose and Makefiles. This ensures that development, testing, and production environments are consistent, reproducible, and easy to manage.
+
+-   **Developer Experience Focused**: We strive to create a seamless and productive developer experience. This is achieved through comprehensive documentation, a robust testing framework, and automated quality checks with pre-commit hooks (Ruff, Black, MyPy).
+
+-   **Cloud-Agnostic and Open Source**: Heimdex is built with open-source components (FastAPI, Qdrant, Postgres) and is designed to be cloud-agnostic. This avoids vendor lock-in and provides the flexibility to deploy on any cloud provider or on-premises infrastructure.
 
 ## Getting Started
 

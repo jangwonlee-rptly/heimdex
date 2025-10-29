@@ -1,4 +1,16 @@
-"""Job management endpoints."""
+"""
+Job Management Endpoints.
+
+This module defines the FastAPI router for creating and managing asynchronous
+jobs. It provides endpoints for initiating new jobs and querying their status.
+All job processing is deferred to a background worker service via a Dramatiq
+message queue.
+
+The API handles:
+-   Creating a new job record in the database.
+-   Enqueuing a task for the worker to process the job.
+-   Retrieving the current status of a job.
+"""
 
 from __future__ import annotations
 
@@ -28,10 +40,17 @@ class JobCreateRequest(BaseModel):
     """
     Defines the request model for creating a new job.
 
+    This Pydantic model is used to validate the request body for the `create_job`
+    endpoint. It specifies the expected data structure for initiating a new
+    background job.
+
     Attributes:
-        type: The type of job to create. Defaults to "mock_process".
-        fail_at_stage: An optional stage name at which the job should
-                       deterministically fail, for testing purposes.
+        type (str): The type of job to create, which determines the actor
+            that will be executed by the worker. Defaults to "mock_process".
+        fail_at_stage (str | None): An optional stage name at which the job
+            should deterministically fail. This is used for testing the
+            worker's retry and error handling mechanisms. If None, the job
+            is expected to complete successfully.
     """
 
     type: str = "mock_process"
@@ -42,8 +61,13 @@ class JobCreateResponse(BaseModel):
     """
     Defines the response model after creating a new job.
 
+    This Pydantic model is used to serialize the response for the `create_job`
+    endpoint. It provides a standardized structure for returning the ID of the
+    newly created job.
+
     Attributes:
-        job_id: The unique identifier for the newly created job.
+        job_id (str): The unique identifier (UUID) for the newly created job.
+            This ID can be used to query the job's status.
     """
 
     job_id: str
@@ -53,16 +77,22 @@ class JobStatusResponse(BaseModel):
     """
     Defines the response model for retrieving a job's status.
 
+    This Pydantic model is used to serialize the response for the `get_job_status`
+    endpoint. It provides a comprehensive overview of a job's current state,
+    including its progress, result, and any errors.
+
     Attributes:
-        id: The job's unique identifier.
-        status: The current status of the job (e.g., "pending", "processing",
-                "completed", "failed").
-        stage: The current processing stage, if applicable.
-        progress: The job's progress as a percentage (0-100).
-        result: A dictionary containing the job's output, if completed.
-        error: An error message, if the job failed.
-        created_at: The timestamp when the job was created.
-        updated_at: The timestamp when the job was last updated.
+        id (str): The job's unique identifier (UUID).
+        status (str): The current status of the job. Common values include
+            "pending", "processing", "completed", and "failed".
+        stage (str | None): The current processing stage, if the job is running
+            and reports its progress in stages.
+        progress (int): The job's progress as a percentage, from 0 to 100.
+        result (dict[str, Any] | None): A dictionary containing the job's
+            output if it has completed successfully.
+        error (str | None): An error message if the job has failed.
+        created_at (str): The ISO 8601 timestamp of when the job was created.
+        updated_at (str): The ISO 8601 timestamp of when the job was last updated.
     """
 
     id: str
@@ -78,17 +108,30 @@ class JobStatusResponse(BaseModel):
 @router.post("", response_model=JobCreateResponse)
 async def create_job(request: JobCreateRequest) -> JobCreateResponse:
     """
-    Create a new job and enqueue it for background processing.
+    Creates and enqueues a new job for asynchronous processing.
 
-    This endpoint initiates a new job, records its initial state in the database,
-    and sends a task to the Dramatiq broker for a worker to process.
+    This endpoint serves as the primary entrypoint for initiating background
+    tasks. It performs several key actions:
+    1.  It creates a new job record in the database with an initial 'queued'
+        status, using the `JobRepository`.
+    2.  It constructs a `dramatiq.Message` to be consumed by a background
+        worker. This message contains the job ID and any parameters required
+        by the worker task.
+    3.  It enqueues the message using the configured Dramatiq broker, making
+        it available for a worker to pick up.
+
+    A default organization ID is used for this single-tenant implementation.
+    This will be replaced with an authenticated organization ID in a future
+    multi-tenant setup.
 
     Args:
-        request: A `JobCreateRequest` object containing the job type and
-                 optional failure stage for testing.
+        request (JobCreateRequest): The request body containing the details
+            for the job to be created. This includes the `type` of the job
+            and an optional `fail_at_stage` parameter for testing purposes.
 
     Returns:
-        A `JobCreateResponse` object with the newly created job's ID.
+        JobCreateResponse: A response object containing the unique identifier
+            (`job_id`) of the newly created and enqueued job.
     """
     # Default org_id for single-tenant setup
     # TODO: Replace with actual org_id from authentication when multi-tenancy is implemented
@@ -122,19 +165,26 @@ async def create_job(request: JobCreateRequest) -> JobCreateResponse:
 @router.get("/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """
-    Retrieve the status of a specific job.
+    Retrieves the current status and details of a specific job.
 
-    This endpoint queries the database for a job by its ID and returns its current
-    state, including status, progress, and any results or errors.
+    This endpoint queries the database for a job by its unique identifier and
+    returns a comprehensive overview of its current state. This includes its
+    status, progress, stage, and any results or errors.
+
+    The status mapping logic ensures that the job status values from the new
+    `JobStatus` enum are backward-compatible with older clients.
 
     Args:
-        job_id: The UUID of the job to retrieve.
+        job_id (str): The UUID of the job to retrieve, passed as a path
+            parameter.
 
     Returns:
-        A `JobStatusResponse` object with the job's details.
+        JobStatusResponse: A response object containing the detailed status
+            of the job.
 
     Raises:
-        HTTPException: If the job with the specified ID is not found.
+        HTTPException: A 404 Not Found error is raised if no job with the
+            specified `job_id` is found in the database.
     """
     with get_db() as session:
         repo = JobRepository(session)

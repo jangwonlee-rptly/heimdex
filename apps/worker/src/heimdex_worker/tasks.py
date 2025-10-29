@@ -1,4 +1,15 @@
-"""Dramatiq tasks for background job processing."""
+"""
+Dramatiq Tasks for Background Job Processing.
+
+This module defines the Dramatiq actors that perform the actual work of
+processing asynchronous jobs. Actors are functions decorated with `@dramatiq.actor`
+which are discovered and run by the Dramatiq worker process.
+
+These tasks are responsible for:
+-   Receiving job information from the message queue.
+-   Executing the job's business logic (e.g., video processing, analysis).
+-   Updating the job's status in the database via the `JobRepository`.
+"""
 
 from __future__ import annotations
 
@@ -37,19 +48,24 @@ def _update_job_status(
     error: str | None = None,
 ) -> None:
     """
-    Update a job's status in the database.
+    Updates a job's status and logs a corresponding event.
 
-    This function uses the JobRepository to update job status with SQLAlchemy ORM.
-    It maintains backward compatibility with the old function signature while storing
-    stage, progress, and result in the job_event table.
+    This helper function provides a consistent way for worker tasks to update
+    the status of a job in the database. It uses the `JobRepository` to
+    abstract the underlying database operations.
+
+    The function also handles the mapping of legacy status values to the new
+    `JobStatus` enum to maintain backward compatibility.
 
     Args:
-        job_id: The ID of the job to update.
-        status: The new status of the job (old values: pending/processing/completed/failed).
-        stage: The new processing stage (stored in event detail).
-        progress: The new progress percentage (stored in event detail).
-        result: A dictionary containing the job's result (stored in event detail).
-        error: An error message if the job failed.
+        job_id (str): The ID of the job to update.
+        status (str | None): The new status of the job. Legacy values like
+            "pending", "processing", "completed", and "failed" are supported
+            and will be mapped to their new equivalents.
+        stage (str | None): The new processing stage to record in the job event.
+        progress (int | None): The new progress percentage (0-100) to record.
+        result (dict | None): A dictionary containing the job's result data.
+        error (str | None): An error message to record if the job failed.
     """
     # Map old status values to new status values
     status_mapping = {
@@ -78,19 +94,27 @@ def _update_job_status(
 @dramatiq.actor(max_retries=3, min_backoff=1000, max_backoff=60000)
 def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
     """
-    Process a mock job with multiple simulated stages.
+    Processes a mock job with multiple simulated stages.
 
-    This Dramatiq actor simulates a multi-stage pipeline (extracting, analyzing,
-    indexing) and updates the job's status in the database at each step. It is
-    designed to handle deterministic failures for testing purposes.
+    This Dramatiq actor serves as a placeholder for a real video processing
+    pipeline. It simulates a multi-stage process, including "extracting",
+    "analyzing", and "indexing", with configurable delays for each stage.
+
+    The actor is designed to handle deterministic failures for testing the
+    retry and error handling mechanisms of the worker. If `fail_at_stage` is
+    provided, the actor will raise an exception when it reaches that stage.
 
     Args:
-        job_id: The UUID of the job to process.
-        fail_at_stage: An optional stage name at which to trigger a
-                       deterministic failure for testing the retry mechanism.
+        job_id (str): The UUID of the job to process. This is used to
+            update the job's status in the database.
+        fail_at_stage (str | None): An optional stage name at which to
+            trigger a deterministic failure. This is used for testing the
+            retry mechanism.
 
     Raises:
-        Exception: If a deterministic failure is triggered.
+        Exception: If a deterministic failure is triggered at the specified
+            `fail_at_stage`. Dramatiq will catch this exception and handle
+            the retry logic.
     """
     log_event("INFO", "job_started", job_id=job_id, fail_at_stage=fail_at_stage)
 

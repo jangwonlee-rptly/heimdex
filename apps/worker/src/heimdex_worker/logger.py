@@ -1,4 +1,14 @@
-"""Structured logging utilities for the Heimdex worker service."""
+"""
+Structured Logging Utilities for the Heimdex Worker Service.
+
+This module provides a standardized way to emit structured JSON logs. Using
+JSON logs allows for easier parsing, filtering, and analysis by logging
+platforms (e.g., Datadog, Splunk).
+
+The `log_event` function is the primary entrypoint, which automatically
+enriches log records with service-wide context such as the service name,
+environment, and version.
+"""
 
 from __future__ import annotations
 
