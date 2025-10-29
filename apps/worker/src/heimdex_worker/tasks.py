@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 import dramatiq
 from dramatiq.brokers.redis import RedisBroker
 
 from heimdex_common.db import get_db
+from heimdex_common.repositories import JobRepository
 
 from .logger import log_event
 
@@ -38,43 +39,39 @@ def _update_job_status(
     """
     Update a job's status in the database.
 
-    This function constructs and executes a SQL UPDATE statement to modify a job's
-    record. It dynamically builds the SET clause based on the provided arguments.
+    This function uses the JobRepository to update job status with SQLAlchemy ORM.
+    It maintains backward compatibility with the old function signature while storing
+    stage, progress, and result in the job_event table.
 
     Args:
         job_id: The ID of the job to update.
-        status: The new status of the job.
-        stage: The new processing stage.
-        progress: The new progress percentage.
-        result: A dictionary containing the job's result.
+        status: The new status of the job (old values: pending/processing/completed/failed).
+        stage: The new processing stage (stored in event detail).
+        progress: The new progress percentage (stored in event detail).
+        result: A dictionary containing the job's result (stored in event detail).
         error: An error message if the job failed.
     """
-    with get_db() as conn, conn.cursor() as cur:
-        updates = ["updated_at = %s"]
-        values: list[Any] = [datetime.now(UTC)]
+    # Map old status values to new status values
+    status_mapping = {
+        "pending": "queued",
+        "processing": "running",
+        "completed": "succeeded",
+        "failed": "failed",
+    }
 
-        if status is not None:
-            updates.append("status = %s")
-            values.append(status)
-        if stage is not None:
-            updates.append("stage = %s")
-            values.append(stage)
-        if progress is not None:
-            updates.append("progress = %s")
-            values.append(progress)
-        if result is not None:
-            updates.append("result = %s::jsonb")
-            import json
+    # Convert status if provided
+    if status is not None:
+        status = status_mapping.get(status, status)
 
-            values.append(json.dumps(result))
-        if error is not None:
-            updates.append("error = %s")
-            values.append(error)
-
-        values.append(job_id)
-        cur.execute(
-            f"UPDATE jobs SET {', '.join(updates)} WHERE id = %s",
-            tuple(values),
+    with get_db() as session:
+        repo = JobRepository(session)
+        repo.update_job_with_stage_progress(
+            job_id=uuid.UUID(job_id),
+            status=status,
+            stage=stage,
+            progress=progress,
+            result=result,
+            error=error,
         )
 
 

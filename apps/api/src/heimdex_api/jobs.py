@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 import dramatiq
-import psycopg2.extras
 from dramatiq.brokers.redis import RedisBroker
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from redis import Redis
 
 from heimdex_common.db import get_db
+from heimdex_common.repositories import JobRepository
 
 # Configure Dramatiq broker
 redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -91,17 +90,20 @@ async def create_job(request: JobCreateRequest) -> JobCreateResponse:
     Returns:
         A `JobCreateResponse` object with the newly created job's ID.
     """
-    job_id = str(uuid.uuid4())
+    # Default org_id for single-tenant setup
+    # TODO: Replace with actual org_id from authentication when multi-tenancy is implemented
+    default_org_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
-    # Insert job into database
-    with get_db() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO jobs (id, status, stage, progress, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (job_id, "pending", None, 0, datetime.now(UTC), datetime.now(UTC)),
+    # Create job using repository
+    with get_db() as session:
+        repo = JobRepository(session)
+        job = repo.create_job(
+            org_id=default_org_id,
+            job_type=request.type,
+            requested_by=None,  # TODO: Add from authentication context
+            priority=0,
         )
+        job_id = str(job.id)
 
     # Send task to dramatiq using message directly (avoids importing worker module)
     # This creates a message for the process_mock actor defined in heimdex_worker.tasks
@@ -134,27 +136,44 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     Raises:
         HTTPException: If the job with the specified ID is not found.
     """
-    with get_db() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT id, status, stage, progress, result, error, created_at, updated_at
-            FROM jobs
-            WHERE id = %s
-            """,
-            (job_id,),
+    with get_db() as session:
+        repo = JobRepository(session)
+        job = repo.get_job_by_id(uuid.UUID(job_id))
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Get latest event for stage/progress/result information
+        latest_event = repo.get_latest_job_event(job.id)
+
+        # Extract stage, progress, and result from event detail
+        stage = None
+        progress = 0
+        result = None
+
+        if latest_event and latest_event.detail_json:
+            stage = latest_event.detail_json.get("stage")
+            progress = latest_event.detail_json.get("progress", 0)
+            result = latest_event.detail_json.get("result")
+
+        # Map new status values to old values for backward compatibility
+        status_mapping = {
+            "queued": "pending",
+            "running": "processing",
+            "succeeded": "completed",
+            "failed": "failed",
+            "canceled": "canceled",
+            "dead_letter": "failed",
+        }
+        status = status_mapping.get(job.status, job.status)
+
+        return JobStatusResponse(
+            id=str(job.id),
+            status=status,
+            stage=stage,
+            progress=progress,
+            result=result,
+            error=job.last_error_message,
+            created_at=job.created_at.isoformat(),
+            updated_at=job.updated_at.isoformat(),
         )
-        row = cur.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    return JobStatusResponse(
-        id=str(row["id"]),
-        status=row["status"],
-        stage=row["stage"],
-        progress=row["progress"],
-        result=row["result"],
-        error=row["error"],
-        created_at=row["created_at"].isoformat(),
-        updated_at=row["updated_at"].isoformat(),
-    )

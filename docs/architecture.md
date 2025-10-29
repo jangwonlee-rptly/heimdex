@@ -31,14 +31,30 @@ Heimdex uses **Dramatiq** with Redis as the message broker to handle long-runnin
 
 ### Database Schema
 
-Jobs table tracks all async work:
-- `id` (UUID): Unique job identifier
-- `status` (VARCHAR): `pending` | `processing` | `completed` | `failed`
-- `stage` (VARCHAR): Current processing stage (e.g., `extracting`, `analyzing`)
-- `progress` (INTEGER): 0-100 percentage
-- `result` (JSONB): Final output data
-- `error` (TEXT): Error message if failed
-- `created_at`, `updated_at` (TIMESTAMP): Audit trail
+**Canonical schema** (managed by Alembic):
+
+**`job` table** (durable ledger):
+- `id` (UUID): Globally unique job identifier
+- `org_id` (UUID): Organization/tenant identifier (for RLS in Supabase)
+- `type` (VARCHAR): Job type discriminator (`mock_process`, `drive_ingest`, etc.)
+- `status` (VARCHAR): `queued` | `running` | `succeeded` | `failed` | `canceled` | `dead_letter`
+- `attempt` (INTEGER): Retry attempt counter (0 = first attempt)
+- `priority` (INTEGER): Job priority (higher = more urgent, future use)
+- `idempotency_key` (VARCHAR): Client-provided key for deduplication
+- `requested_by` (VARCHAR): User/service that requested the job
+- `created_at`, `updated_at`, `started_at`, `finished_at` (TIMESTAMPTZ): Lifecycle timestamps
+- `last_error_code` (VARCHAR): Error classification (`TIMEOUT`, `VALIDATION_ERROR`, etc.)
+- `last_error_message` (TEXT): Human-readable error detail
+
+**`job_event` table** (immutable audit log):
+- `id` (UUID): Unique event identifier
+- `job_id` (UUID): Foreign key to `job.id`
+- `ts` (TIMESTAMPTZ): Event occurrence timestamp
+- `prev_status` (VARCHAR): Status before transition (NULL for initial state)
+- `next_status` (VARCHAR): Status after transition
+- `detail_json` (JSONB): Additional metadata (stage, progress, error details)
+
+See `docs/db-schema.md` for full schema reference including indexes and constraints.
 
 ### Retry Strategy
 
@@ -49,9 +65,86 @@ Configured in `@dramatiq.actor` decorator:
 
 After exhausting retries, jobs move to Redis dead-letter queue for manual inspection.
 
+## Dependency Readiness
+
+### Health vs. Readiness
+
+**`/healthz`**: Basic liveness check (process running, responding)
+- Returns static metadata: service name, version, environment, start time
+- Always returns HTTP 200 if process is alive
+- No dependency checks (fast, non-blocking)
+
+**`/readyz`**: Comprehensive readiness check with dependency probes
+- Probes all critical dependencies: PostgreSQL, Redis, Qdrant, GCS
+- Returns HTTP 200 if all deps are healthy, HTTP 503 otherwise
+- Includes per-dependency timing (milliseconds)
+- Used by orchestrators (k8s, Cloud Run) to route traffic
+
+### Probe Semantics
+
+Each probe:
+1. Performs a shallow health check (e.g., `SELECT 1` for PostgreSQL, `PING` for Redis)
+2. Enforces a short timeout (default: 1000ms, GCS gets 2000ms for cold start)
+3. Returns `{ok: bool, ms: float, error: string | null}`
+
+**Failure Modes**:
+- **Connection refused**: Dependency not reachable (wrong hostname, service down)
+- **Timeout**: Dependency slow/overloaded (probe timeout exceeded)
+- **Auth error**: Credentials invalid (check env vars)
+
+### Readiness Response Example
+
+```json
+{
+  "ok": true,
+  "service": "heimdex-api",
+  "version": "0.0.0",
+  "env": "local",
+  "deps": {
+    "pg": {"ok": true, "ms": 12.34, "error": null},
+    "redis": {"ok": true, "ms": 5.67, "error": null},
+    "qdrant": {"ok": true, "ms": 18.92, "error": null},
+    "gcs": {"ok": true, "ms": 45.23, "error": null}
+  }
+}
+```
+
+If any dependency fails:
+```json
+{
+  "ok": false,
+  "service": "heimdex-api",
+  "version": "0.0.0",
+  "env": "local",
+  "deps": {
+    "pg": {"ok": false, "ms": 1003.45, "error": "connection timeout"},
+    "redis": {"ok": true, "ms": 5.67, "error": null},
+    "qdrant": {"ok": true, "ms": 18.92, "error": null},
+    "gcs": {"ok": true, "ms": 45.23, "error": null}
+  }
+}
+```
+→ Returns **HTTP 503 Service Unavailable**
+
+### Timeout Strategy
+
+| Dependency | Timeout | Rationale |
+|------------|---------|-----------|
+| PostgreSQL | 1000ms | Low latency expected for local connections |
+| Redis | 1000ms | In-memory, should respond instantly |
+| Qdrant | 1000ms | HTTP API, fast response expected |
+| GCS | 2000ms | Emulator may have cold-start delay |
+
+### Usage
+
+- **Orchestration**: Configure k8s/Cloud Run readiness probes to poll `/readyz`
+- **Manual debugging**: `make readyz` (formatted JSON output)
+- **CI/CD**: Healthcheck script before running integration tests
+
 ## Health & Operations
 
-- API service exposes `/healthz` returning static metadata (service, version, environment, boot timestamp) to satisfy orchestration health probes without leaking infrastructure details.
+- API service exposes `/healthz` for liveness and `/readyz` for dependency-aware readiness checks.
 - Worker service runs Dramatiq process with configurable concurrency (1 process, 2 threads by default).
 - Both services log exclusively in single-line JSON with `ts`, `service`, `env`, `version`, `level`, and `msg` to keep observability tooling uniform.
+- Configuration is loaded at startup from environment variables and logged once (redacted) for auditability.
 - Docker healthchecks monitor HTTP readiness for the API, database connectivity for Postgres, and process liveness for workers.

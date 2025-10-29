@@ -52,13 +52,21 @@ def main() -> int:
     """
     Run the worker's main entrypoint.
 
-    This function initializes the worker by logging a startup message, registering
-    signal handlers for graceful shutdown, and starting the main heartbeat loop.
+    This function initializes the worker by logging a startup message with configuration,
+    registering signal handlers for graceful shutdown, and starting the main heartbeat loop.
 
     Returns:
         An exit code of 0.
     """
-    log_event("INFO", "starting", interval_seconds=_HEARTBEAT_INTERVAL)
+    from heimdex_common.config import get_config
+
+    config = get_config()
+    log_event(
+        "INFO",
+        "starting",
+        interval_seconds=_HEARTBEAT_INTERVAL,
+        config=config.log_summary(redact_secrets=True),
+    )
     _register_signal_handlers()
     _heartbeat_loop()
     log_event("INFO", "stopped")

@@ -24,6 +24,8 @@ repos:
           - dramatiq[redis]>=1.17.0,<2.0.0
           - psycopg2-binary>=2.9.9,<3.0.0
           - redis>=5.0.0,<6.0.0
+          - sqlalchemy>=2.0.0,<3.0.0
+          - types-requests>=2.32.0,<3.0.0
         files: ^(apps|packages)/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

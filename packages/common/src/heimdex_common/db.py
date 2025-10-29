@@ -1,93 +1,103 @@
-"""Database connection and utilities."""
+"""Database connection and session management."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
-import psycopg2
-import psycopg2.extras
-from psycopg2.extensions import connection as Connection
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from .config import get_config
+from .models import Base
+
+# Global engine and session factory (lazy loaded)
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
-def get_database_url() -> str:
+def get_engine() -> Engine:
     """
-    Construct the database connection URL from environment variables.
-
-    This function reads database connection details (user, password, host, port,
-    and database name) from environment variables and assembles them into a
-    PostgreSQL connection URL.
+    Get or create the global SQLAlchemy engine.
 
     Returns:
-        The full database connection URL.
+        SQLAlchemy engine instance
     """
-    user = os.getenv("PGUSER", "heimdex")
-    password = os.getenv("PGPASSWORD", "heimdex")
-    host = os.getenv("PGHOST", "localhost")
-    port = os.getenv("PGPORT", "5432")
-    database = os.getenv("PGDATABASE", "heimdex")
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    global _engine
+    if _engine is None:
+        config = get_config()
+        _engine = create_engine(
+            config.get_database_url(),
+            pool_pre_ping=True,  # Verify connections before using
+            pool_size=5,
+            max_overflow=10,
+        )
+    return _engine
 
 
-def get_connection() -> Connection:
+def get_session_factory() -> sessionmaker[Session]:
     """
-    Create a new database connection.
-
-    This function establishes a new connection to the PostgreSQL database using the
-    URL constructed from environment variables.
+    Get or create the global session factory.
 
     Returns:
-        A new database connection object.
+        SQLAlchemy sessionmaker instance
     """
-    return psycopg2.connect(get_database_url())
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=get_engine(),
+        )
+    return _SessionLocal
 
 
 @contextmanager
-def get_db() -> Generator[Connection, None, None]:
+def get_db() -> Generator[Session, None, None]:
     """
-    Provide a transactional database connection as a context manager.
+    Provide a transactional database session as a context manager.
 
-    This function yields a database connection that automatically commits on
-    successful exit and rolls back on exceptions, ensuring that the connection
+    This function yields a SQLAlchemy session that automatically commits on
+    successful exit and rolls back on exceptions, ensuring that the session
     is always closed.
 
     Yields:
-        A database connection object.
+        A SQLAlchemy Session object.
     """
-    conn = get_connection()
+    SessionLocal = get_session_factory()
+    session = SessionLocal()
     try:
-        yield conn
-        conn.commit()
+        yield session
+        session.commit()
     except Exception:
-        conn.rollback()
+        session.rollback()
         raise
     finally:
-        conn.close()
+        session.close()
+
+
+def create_tables() -> None:
+    """
+    Create all tables defined in SQLAlchemy models.
+
+    This function is primarily for development/testing. In production, use Alembic
+    migrations instead.
+    """
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
+
+
+def drop_tables() -> None:
+    """
+    Drop all tables defined in SQLAlchemy models.
+
+    WARNING: This is destructive and should only be used in development/testing.
+    """
+    engine = get_engine()
+    Base.metadata.drop_all(bind=engine)
 
 
 def init_db() -> None:
-    """
-    Initialize the database schema by creating tables and indexes.
-
-    This function executes a SQL script to create the `jobs` table and associated
-    indexes if they do not already exist, ensuring the database is ready for use.
-    """
-    schema = """
-    CREATE TABLE IF NOT EXISTS jobs (
-        id UUID PRIMARY KEY,
-        status VARCHAR(20) NOT NULL,
-        stage VARCHAR(50),
-        progress INTEGER DEFAULT 0,
-        result JSONB,
-        error TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-    CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
-    """
-
-    with get_db() as conn, conn.cursor() as cur:
-        cur.execute(schema)
+    """Backward-compatible alias for initial schema creation."""
+    create_tables()

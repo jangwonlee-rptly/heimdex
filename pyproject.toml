@@ -57,3 +57,4 @@ strict_equality = true
 ignore_missing_imports = true
 # Keep type-checking out of non-code areas
 exclude = '(^(deploy|docs)/|^\.venv/|/__pycache__/)'
+plugins = ["sqlalchemy.ext.mypy.plugin"]

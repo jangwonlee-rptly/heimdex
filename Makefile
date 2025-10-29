@@ -1,4 +1,4 @@
-.PHONY: lint fmt setup up down logs health reset test-job test-job-fail check-job
+.PHONY: lint fmt setup up down logs health readyz reset test-job test-job-fail check-job migrate makemigration migration-history
 
 lint:
 	@echo "placeholder for repository linting (ruff, mypy)"
@@ -8,6 +8,19 @@ fmt:
 
 setup:
 	@echo "placeholder for environment bootstrap"
+
+# Database migrations
+migrate:
+	@echo "Running Alembic migrations..."
+	@cd packages/common && alembic upgrade head
+
+makemigration:
+	@echo "Generating new Alembic migration (autogenerate)..."
+	@cd packages/common && alembic revision --autogenerate
+
+migration-history:
+	@echo "Showing Alembic migration history..."
+	@cd packages/common && alembic history --verbose
 
 up:
 	$(MAKE) -C deploy up
@@ -20,6 +33,10 @@ logs:
 
 health:
 	curl -fsS http://localhost:8000/healthz
+
+readyz:
+	@echo "Checking API readiness (with dependency probes)..."
+	@curl -fsS http://localhost:8000/readyz | python3 -m json.tool
 
 reset:
 	@echo "Resetting database and Redis..."

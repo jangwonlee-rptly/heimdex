@@ -28,14 +28,19 @@ async def on_startup() -> None:
     Handle application startup events.
 
     This function is executed when the FastAPI application starts. It logs a startup
-    message and initializes the database schema to ensure all tables are created
-    before the service begins accepting requests.
+    message with redacted configuration, and prepares the database connection pool.
+    Database schema migrations should be run separately via Alembic.
     """
-    log_event("INFO", "starting", env=_ENV, started_at=_STARTED_AT_ISO)
-    # Initialize database schema
-    from .db_init import main as init_db_schema
+    from heimdex_common.config import get_config
 
-    init_db_schema()
+    config = get_config()
+    log_event(
+        "INFO",
+        "starting",
+        env=_ENV,
+        started_at=_STARTED_AT_ISO,
+        config=config.log_summary(redact_secrets=True),
+    )
 
 
 @app.on_event("shutdown")
@@ -84,10 +89,11 @@ async def request_logger(
 @app.get("/healthz", response_class=JSONResponse)
 async def healthz() -> JSONResponse:
     """
-    Perform a health check.
+    Perform a basic health check.
 
     This endpoint returns a JSON response with the service's status, version,
-    environment, and start time, confirming that the API is running.
+    environment, and start time, confirming that the API process is running.
+    This does NOT check dependencies - use /readyz for that.
 
     Returns:
         A JSON response containing the health check information.
@@ -100,3 +106,33 @@ async def healthz() -> JSONResponse:
         "started_at": _STARTED_AT_ISO,
     }
     return JSONResponse(content=payload)
+
+
+@app.get("/readyz", response_class=JSONResponse)
+async def readyz() -> JSONResponse:
+    """
+    Perform a readiness check with dependency probes.
+
+    This endpoint probes all critical dependencies (PostgreSQL, Redis, Qdrant, GCS)
+    and returns their status with timing information. The service is considered ready
+    only if all dependencies are reachable.
+
+    Returns:
+        A JSON response with dependency status and overall readiness.
+        Returns HTTP 503 if any dependency is down.
+    """
+    from heimdex_common.probes import is_ready, probe_all_dependencies
+
+    probes = probe_all_dependencies(timeout_ms=1000)
+    ready = is_ready(probes)
+
+    payload = {
+        "ok": ready,
+        "service": SERVICE_NAME,
+        "version": __version__,
+        "env": _ENV,
+        **probes,
+    }
+
+    status_code = 200 if ready else 503
+    return JSONResponse(content=payload, status_code=status_code)
