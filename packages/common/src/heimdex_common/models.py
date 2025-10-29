@@ -1,4 +1,13 @@
-"""SQLAlchemy models for Heimdex database schema."""
+"""
+SQLAlchemy Models for Heimdex Database Schema.
+
+This module defines the SQLAlchemy ORM models that represent the database
+schema for the Heimdex application. It includes models for jobs, job events,
+and other core entities.
+
+The `Base` class is the declarative base for all models, and the `metadata_obj`
+is used to define a consistent naming convention for database constraints.
+"""
 
 from __future__ import annotations
 
@@ -33,13 +42,39 @@ metadata_obj = MetaData(
 
 
 class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
+    """
+    Base class for all SQLAlchemy models in the application.
+
+    This class provides a common base for all ORM models, and it is configured
+    with a `MetaData` object that defines a consistent naming convention for
+    database constraints. This helps to ensure that index, unique constraint,
+    and foreign key names are generated in a predictable and standardized way.
+    """
 
     metadata = metadata_obj
 
 
 class JobStatus(str, Enum):
-    """Allowed job status values."""
+    """
+    Enumeration of allowed job status values.
+
+    This enum defines the possible states in the job lifecycle, ensuring that
+    the `status` field in the `Job` model is always one of these well-defined
+    values.
+
+    Attributes:
+        QUEUED (str): The initial state of a job when it is first created.
+        RUNNING (str): The state of a job while it is being processed by a
+            worker.
+        SUCCEEDED (str): The terminal state of a job that has completed
+            successfully.
+        FAILED (str): The terminal state of a job that has failed and may be
+            retried.
+        CANCELED (str): The terminal state of a job that has been manually
+            canceled.
+        DEAD_LETTER (str): The terminal state of a job that has failed all of
+            its retry attempts.
+    """
 
     QUEUED = "queued"
     RUNNING = "running"
@@ -50,7 +85,19 @@ class JobStatus(str, Enum):
 
 
 class BackoffPolicy(str, Enum):
-    """Backoff policies for retry scheduling."""
+    """
+    Enumeration of backoff policies for retry scheduling.
+
+    This enum defines the strategies that can be used to schedule retries for
+    failed jobs.
+
+    Attributes:
+        NONE (str): No backoff policy; the job will not be retried.
+        FIXED (str): A fixed backoff policy, where the delay between retries
+            is constant.
+        EXPONENTIAL (str): An exponential backoff policy, where the delay
+            between retries increases exponentially.
+    """
 
     NONE = "none"
     FIXED = "fixed"
@@ -59,13 +106,35 @@ class BackoffPolicy(str, Enum):
 
 class Job(Base):
     """
-    Durable ledger for all asynchronous jobs.
+    Represents the durable ledger for all asynchronous jobs.
 
-    This table stores the operational state of jobs and is the primary source of truth
-    for job status queries. It supports org-scoped multi-tenancy, idempotent job creation,
-    and retry logic.
+    This SQLAlchemy model maps to the `job` table in the database. It stores
+    the operational state of jobs and serves as the primary source of truth for
+    job status queries. The model includes support for org-scoped multi-tenancy,
+    idempotent job creation, and configurable retry logic.
 
-    State machine: queued → running → (succeeded | failed | canceled | dead_letter)
+    The job lifecycle follows a state machine:
+    `queued` → `running` → (`succeeded` | `failed` | `canceled` | `dead_letter`)
+
+    Attributes:
+        id (uuid.UUID): The globally unique identifier for the job.
+        org_id (uuid.UUID): The organization/tenant identifier for RLS.
+        type (str): The job type discriminator (e.g., 'mock_process').
+        status (JobStatus): The current state of the job.
+        attempt (int): The retry attempt counter.
+        max_attempts (int): The maximum number of retry attempts.
+        backoff_policy (BackoffPolicy): The backoff policy for retries.
+        priority (int): The job priority (higher is more urgent).
+        idempotency_key (str | None): A client-provided key for deduplication.
+        requested_by (str | None): The user or service that requested the job.
+        created_at (datetime): The timestamp when the job was created.
+        updated_at (datetime): The timestamp when the job was last modified.
+        started_at (datetime | None): The timestamp when job execution started.
+        finished_at (datetime | None): The timestamp when the job reached a
+            terminal state.
+        last_error_code (str | None): An error classification code.
+        last_error_message (str | None): A human-readable error message.
+        events (list[JobEvent]): A relationship to the job's events.
     """
 
     __tablename__ = "job"
@@ -224,10 +293,23 @@ class Job(Base):
 
 class JobEvent(Base):
     """
-    Immutable audit log of all job state transitions.
+    Represents an immutable audit log of all job state transitions.
 
-    This table provides a complete timeline of job state changes for debugging,
-    compliance, and analytics. Events are append-only and never modified.
+    This SQLAlchemy model maps to the `job_event` table. It provides a
+    complete timeline of a job's state changes, which is invaluable for
+    debugging, compliance, and analytics. Events are designed to be
+    append-only and should never be modified.
+
+    Attributes:
+        id (uuid.UUID): The unique identifier for the event.
+        job_id (uuid.UUID): A foreign key to the parent job.
+        ts (datetime): The timestamp of when the event occurred.
+        prev_status (str | None): The status of the job before the
+            transition. This is `None` for the initial event.
+        next_status (str): The status of the job after the transition.
+        detail_json (dict | None): A JSONB field for storing additional
+            event metadata, such as stage, progress, or error details.
+        job (Job): A relationship to the parent `Job` object.
     """
 
     __tablename__ = "job_event"

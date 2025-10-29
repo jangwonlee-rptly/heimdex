@@ -1,4 +1,15 @@
-"""Database connection and session management."""
+"""
+Database Connection and Session Management.
+
+This module provides utilities for managing database connections and sessions
+using SQLAlchemy. It includes functions for creating a global engine and
+session factory, as well as a context manager for providing transactional
+sessions.
+
+The `get_db` context manager is the recommended way to interact with the
+database, as it ensures that sessions are properly handled and transactions
+are committed or rolled back as needed.
+"""
 
 from __future__ import annotations
 
@@ -19,10 +30,14 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 def get_engine() -> Engine:
     """
-    Get or create the global SQLAlchemy engine.
+    Retrieves or creates the global SQLAlchemy engine.
+
+    This function implements a singleton pattern for the SQLAlchemy engine to
+    ensure that only one engine is created per process. The engine is configured
+    with a connection pool and pre-ping to handle transient connection issues.
 
     Returns:
-        SQLAlchemy engine instance
+        Engine: The global SQLAlchemy `Engine` instance.
     """
     global _engine
     if _engine is None:
@@ -38,10 +53,14 @@ def get_engine() -> Engine:
 
 def get_session_factory() -> sessionmaker[Session]:
     """
-    Get or create the global session factory.
+    Retrieves or creates the global SQLAlchemy session factory.
+
+    This function creates a `sessionmaker` instance that is bound to the
+    global engine. The session factory is configured to not autocommit or
+    autoflush, giving explicit control over transaction boundaries.
 
     Returns:
-        SQLAlchemy sessionmaker instance
+        sessionmaker[Session]: The global SQLAlchemy `sessionmaker` instance.
     """
     global _SessionLocal
     if _SessionLocal is None:
@@ -56,14 +75,16 @@ def get_session_factory() -> sessionmaker[Session]:
 @contextmanager
 def get_db() -> Generator[Session, None, None]:
     """
-    Provide a transactional database session as a context manager.
+    Provides a transactional database session as a context manager.
 
-    This function yields a SQLAlchemy session that automatically commits on
-    successful exit and rolls back on exceptions, ensuring that the session
-    is always closed.
+    This is the recommended way to interact with the database. It provides a
+    SQLAlchemy session from the session factory and handles the session's
+    lifecycle. On successful exit from the context, the transaction is
+    committed. If an exception occurs, the transaction is rolled back. In
+    both cases, the session is always closed.
 
     Yields:
-        A SQLAlchemy Session object.
+        Generator[Session, None, None]: A SQLAlchemy `Session` object.
     """
     SessionLocal = get_session_factory()
     session = SessionLocal()
@@ -79,10 +100,11 @@ def get_db() -> Generator[Session, None, None]:
 
 def create_tables() -> None:
     """
-    Create all tables defined in SQLAlchemy models.
+    Creates all tables defined in the SQLAlchemy models.
 
-    This function is primarily for development/testing. In production, use Alembic
-    migrations instead.
+    This function is intended for use in development and testing environments.
+    For production environments, it is strongly recommended to use a database
+    migration tool like Alembic to manage schema changes.
     """
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
@@ -90,14 +112,21 @@ def create_tables() -> None:
 
 def drop_tables() -> None:
     """
-    Drop all tables defined in SQLAlchemy models.
+    Drops all tables defined in the SQLAlchemy models.
 
-    WARNING: This is destructive and should only be used in development/testing.
+    Warning:
+        This is a destructive operation and should only be used in development
+        and testing environments. It will result in the loss of all data.
     """
     engine = get_engine()
     Base.metadata.drop_all(bind=engine)
 
 
 def init_db() -> None:
-    """Backward-compatible alias for initial schema creation."""
+    """
+    A backward-compatible alias for creating the initial database schema.
+
+    This function is an alias for `create_tables` and is maintained for
+    backward compatibility with older scripts.
+    """
     create_tables()

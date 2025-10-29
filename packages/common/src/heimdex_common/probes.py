@@ -1,4 +1,19 @@
-"""Profile-aware dependency health probes with retry, backoff, and caching."""
+"""
+Profile-Aware Dependency Health Probes.
+
+This module provides a robust mechanism for checking the health of external
+dependencies (e.g., PostgreSQL, Redis). It is designed to be profile-aware,
+meaning it only probes dependencies that are enabled in the current
+configuration.
+
+Features include:
+-   **Retry with backoff**: Automatically retries failed probes with jittered
+    exponential backoff to handle transient failures.
+-   **Caching**: Caches successful probe results to reduce overhead and caches
+    failed results to prevent excessive probing of a known-down dependency.
+-   **Structured logging**: Emits structured JSON logs for easy monitoring and
+    analysis of probe attempts.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +48,21 @@ _probe_cache: dict[str, ProbeCacheEntry] = {}
 
 
 class DepProbeResult(TypedDict):
-    """Result of a single dependency probe."""
+    """
+    Represents the result of a single dependency probe.
+
+    This `TypedDict` defines the standardized structure for the result of a
+    single dependency probe.
+
+    Attributes:
+        enabled (bool): Whether the dependency check is enabled.
+        skipped (bool): Whether the probe was skipped because it was disabled.
+        ok (bool | None): The result of the probe (True for success, False for
+            failure). This is `None` if the probe was skipped.
+        latency_ms (float | None): The latency of the probe in milliseconds.
+        attempts (int): The number of attempts made to probe the dependency.
+        reason (str | None): The reason for a failed probe.
+    """
 
     enabled: bool
     skipped: bool
@@ -44,7 +73,22 @@ class DepProbeResult(TypedDict):
 
 
 class ReadinessResult(TypedDict):
-    """Uniform readiness response structure."""
+    """
+    Represents the uniform readiness response structure.
+
+    This `TypedDict` defines the standardized structure for the overall
+    readiness response, which includes the status of all dependencies.
+
+    Attributes:
+        service (str): The name of the service.
+        env (str): The deployment environment.
+        version (str): The version of the service.
+        ready (bool): The overall readiness status of the service.
+        summary (Literal["ok", "degraded", "down"]): A summary of the
+            readiness status.
+        deps (dict[str, DepProbeResult]): A dictionary containing the probe
+            results for each dependency.
+    """
 
     service: str
     env: str
@@ -55,7 +99,18 @@ class ReadinessResult(TypedDict):
 
 
 def _jittered_backoff(attempt: int, base_ms: int = 100, max_ms: int = 200) -> None:
-    """Sleep with jittered exponential backoff."""
+    """
+    Sleeps with jittered exponential backoff.
+
+    This function is used to add a delay between probe retries. The delay
+    increases exponentially with each attempt, and a random jitter is added
+    to prevent a "thundering herd" of retries.
+
+    Args:
+        attempt (int): The current retry attempt number.
+        base_ms (int): The base delay in milliseconds. Defaults to 100.
+        max_ms (int): The maximum delay in milliseconds. Defaults to 200.
+    """
     delay_ms = min(base_ms * (2**attempt), max_ms)
     jitter = random.uniform(0.8, 1.2)
     time.sleep((delay_ms * jitter) / 1000)
@@ -63,10 +118,17 @@ def _jittered_backoff(attempt: int, base_ms: int = 100, max_ms: int = 200) -> No
 
 def _probe_postgres_once(timeout_ms: int) -> tuple[bool, float, str | None]:
     """
-    Single attempt to probe PostgreSQL.
+    Performs a single attempt to probe the PostgreSQL database.
+
+    Args:
+        timeout_ms (int): The timeout for the connection attempt in
+            milliseconds.
 
     Returns:
-        (success, latency_ms, error_reason)
+        tuple[bool, float, str | None]: A tuple containing:
+            - A boolean indicating the success of the probe.
+            - The latency of the probe in milliseconds.
+            - A string reason for the failure, or `None` on success.
     """
     config = get_config()
     start = time.perf_counter()
@@ -97,10 +159,15 @@ def _probe_postgres_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 
 def _probe_redis_once(timeout_ms: int) -> tuple[bool, float, str | None]:
     """
-    Single attempt to probe Redis.
+    Performs a single attempt to probe the Redis server.
+
+    Args:
+        timeout_ms (int): The timeout for the connection attempt in
+            milliseconds.
 
     Returns:
-        (success, latency_ms, error_reason)
+        tuple[bool, float, str | None]: A tuple containing the success status,
+            latency, and an optional failure reason.
     """
     config = get_config()
     start = time.perf_counter()
@@ -125,10 +192,14 @@ def _probe_redis_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 
 def _probe_qdrant_once(timeout_ms: int) -> tuple[bool, float, str | None]:
     """
-    Single attempt to probe Qdrant.
+    Performs a single attempt to probe the Qdrant vector database.
+
+    Args:
+        timeout_ms (int): The timeout for the HTTP request in milliseconds.
 
     Returns:
-        (success, latency_ms, error_reason)
+        tuple[bool, float, str | None]: A tuple containing the success status,
+            latency, and an optional failure reason.
     """
     import requests
 
@@ -153,10 +224,14 @@ def _probe_qdrant_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 
 def _probe_gcs_once(timeout_ms: int) -> tuple[bool, float, str | None]:
     """
-    Single attempt to probe GCS.
+    Performs a single attempt to probe the GCS-compatible storage.
+
+    Args:
+        timeout_ms (int): The timeout for the GCS request in milliseconds.
 
     Returns:
-        (success, latency_ms, error_reason)
+        tuple[bool, float, str | None]: A tuple containing the success status,
+            latency, and an optional failure reason.
     """
     config = get_config()
     start = time.perf_counter()
@@ -187,16 +262,20 @@ def _probe_with_retry(
     retries: int,
 ) -> DepProbeResult:
     """
-    Probe a dependency with retry and backoff.
+    Probes a dependency with retry and backoff logic.
+
+    This function repeatedly calls a probe function until it succeeds or the
+    maximum number of retries is reached. It uses jittered exponential
+    backoff between retries.
 
     Args:
-        dep_name: Dependency name (for logging)
-        probe_fn: Function that returns (success, latency_ms, error_reason)
-        timeout_ms: Per-attempt timeout in milliseconds
-        retries: Number of retry attempts
+        dep_name (str): The name of the dependency (for logging).
+        probe_fn (ProbeFn): The function to call for a single probe attempt.
+        timeout_ms (int): The timeout for each probe attempt.
+        retries (int): The maximum number of retry attempts.
 
     Returns:
-        DepProbeResult with aggregated outcome
+        DepProbeResult: The aggregated result of the probe attempts.
     """
     attempts = 0
     last_error = None
@@ -245,7 +324,16 @@ def _probe_with_retry(
 
 
 def _get_cached_probe(dep_name: str) -> DepProbeResult | None:
-    """Get cached probe result if not expired."""
+    """
+    Retrieves a cached probe result if it has not expired.
+
+    Args:
+        dep_name (str): The name of the dependency.
+
+    Returns:
+        DepProbeResult | None: The cached probe result, or `None` if not
+            found or expired.
+    """
     now = time.time()
     if dep_name in _probe_cache:
         entry = _probe_cache[dep_name]
@@ -260,7 +348,19 @@ def _cache_probe(
     cache_sec: int,
     cooldown_sec: int,
 ) -> None:
-    """Cache probe result with TTL based on success/failure."""
+    """
+    Caches a probe result with a TTL based on its success or failure.
+
+    Successful results are cached for a shorter duration, while failed
+    results are cached for a longer "cooldown" period to avoid excessive
+    probing of a known-down dependency.
+
+    Args:
+        dep_name (str): The name of the dependency.
+        result (DepProbeResult): The probe result to cache.
+        cache_sec (int): The TTL in seconds for successful results.
+        cooldown_sec (int): The TTL in seconds for failed results.
+    """
     now = time.time()
     ttl = cache_sec if result["ok"] else cooldown_sec
 
@@ -272,17 +372,18 @@ def _cache_probe(
 
 def probe_dependency(dep_name: str) -> DepProbeResult:
     """
-    Probe a single dependency with profile-awareness and caching.
+    Probes a single dependency with profile-awareness and caching.
 
-    If the dependency is disabled via config, returns a skipped result.
-    If cached and not expired, returns cached result.
-    Otherwise, performs a fresh probe with retry/backoff.
+    This function orchestrates the probing of a single dependency. It checks
+    if the probe is enabled, retrieves a cached result if available, or
+    performs a fresh probe with retry logic.
 
     Args:
-        dep_name: Dependency name ("pg", "redis", "qdrant", "gcs")
+        dep_name (str): The name of the dependency to probe (e.g., "pg",
+            "redis").
 
     Returns:
-        DepProbeResult with status and timing
+        DepProbeResult: The result of the dependency probe.
     """
     config = get_config()
 
@@ -340,14 +441,19 @@ def probe_dependency(dep_name: str) -> DepProbeResult:
 
 def check_readiness(service: str, version: str) -> ReadinessResult:
     """
-    Check readiness of all enabled dependencies.
+    Checks the readiness of all enabled dependencies.
+
+    This function is the main entrypoint for the readiness probe. It probes
+    all enabled dependencies and aggregates their results into a single
+    readiness response.
 
     Args:
-        service: Service name (e.g., "api", "worker")
-        version: Service version
+        service (str): The name of the service (e.g., "api", "worker").
+        version (str): The version of the service.
 
     Returns:
-        ReadinessResult with uniform JSON structure
+        ReadinessResult: A dictionary with the overall readiness status and
+            detailed results for each dependency.
     """
     config = get_config()
 
@@ -399,6 +505,12 @@ def check_readiness(service: str, version: str) -> ReadinessResult:
 
 
 def clear_probe_cache() -> None:
-    """Clear all cached probe results. Useful for testing."""
+    """
+    Clears all cached probe results.
+
+    This function is primarily useful for testing, where it may be necessary
+    to perform fresh probes in different test cases without being affected by
+    cached results.
+    """
     global _probe_cache
     _probe_cache = {}

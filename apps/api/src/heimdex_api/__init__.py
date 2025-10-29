@@ -1,4 +1,14 @@
-"""Heimdex API service package."""
+"""
+Heimdex API Service Package.
+
+This package contains the main entrypoint and core components for the Heimdex
+FastAPI application. It is responsible for handling HTTP requests, managing
+asynchronous jobs, and providing health check endpoints.
+
+Attributes:
+    SERVICE_NAME (str): The name of the service, used for logging and identification.
+    __version__ (str): The version of the service, retrieved from package metadata.
+"""
 
 from importlib import metadata
 from typing import Final

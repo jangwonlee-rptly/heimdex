@@ -1,4 +1,14 @@
-"""Configuration management for Heimdex services."""
+"""
+Configuration Management for Heimdex Services.
+
+This module provides a centralized configuration solution using Pydantic's
+`BaseSettings`. It allows for type-safe configuration management from
+environment variables and `.env` files.
+
+The `HeimdexConfig` class defines all available configuration parameters,
+and the `get_config` function provides a singleton instance of the
+configuration for use throughout the application.
+"""
 
 from __future__ import annotations
 
@@ -10,10 +20,51 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class HeimdexConfig(BaseSettings):
     """
-    Centralized configuration for Heimdex services.
+    Centralized configuration for Heimdex services using Pydantic BaseSettings.
 
-    All configuration values are read from environment variables with sensible defaults
-    for local development. Production environments must explicitly set all required values.
+    This class defines the complete set of configuration parameters required
+    by the application. It loads values from environment variables, with
+    sensible defaults provided for local development. For production
+    environments, all required values must be explicitly set.
+
+    The `model_config` attribute is used to configure the behavior of Pydantic,
+    including the path to the `.env` file.
+
+    Attributes:
+        environment (Literal["local", "dev", "staging", "prod"]): The deployment
+            environment, which can affect logging levels and other behaviors.
+        version (str): The version of the service, typically injected at
+            build time.
+        pghost (str): The hostname of the PostgreSQL database.
+        pgport (int): The port of the PostgreSQL database.
+        pguser (str): The username for the PostgreSQL database.
+        pgpassword (str): The password for the PostgreSQL database.
+        pgdatabase (str): The name of the PostgreSQL database.
+        redis_url (str): The connection URL for the Redis server.
+        qdrant_url (str): The HTTP API URL for the Qdrant vector database.
+        gcs_endpoint (str): The endpoint for a GCS-compatible storage service,
+            used for local development with MinIO.
+        gcs_bucket (str): The name of the GCS bucket for asset storage.
+        gcs_project_id (str): The GCS project ID.
+        gcs_use_ssl (bool): Whether to use SSL for GCS connections.
+        google_application_credentials (str | None): The path to the GCS
+            service account JSON file.
+        enable_pg (bool): A flag to enable or disable the PostgreSQL
+            dependency check in the readiness probe.
+        enable_redis (bool): A flag to enable or disable the Redis dependency
+            check in the readiness probe.
+        enable_qdrant (bool): A flag to enable or disable the Qdrant
+            dependency check in the readiness probe.
+        enable_gcs (bool): A flag to enable or disable the GCS dependency
+            check in the readiness probe.
+        probe_timeout_ms (int): The timeout in milliseconds for dependency
+            probes.
+        probe_retries (int): The number of retries for failed dependency
+            probes.
+        probe_cooldown_sec (int): The cooldown period in seconds for failed
+            dependency probes.
+        probe_cache_sec (int): The cache duration in seconds for successful
+            dependency probes.
     """
 
     model_config = SettingsConfigDict(
@@ -150,7 +201,18 @@ class HeimdexConfig(BaseSettings):
     @field_validator("pgport")
     @classmethod
     def validate_pgport(cls, v: int) -> int:
-        """Ensure PostgreSQL port is in valid range."""
+        """
+        Validates that the PostgreSQL port is in the valid range.
+
+        Args:
+            v (int): The PostgreSQL port to validate.
+
+        Returns:
+            int: The validated PostgreSQL port.
+
+        Raises:
+            ValueError: If the port is not in the range 1-65535.
+        """
         if not (1 <= v <= 65535):
             raise ValueError(f"Invalid PostgreSQL port: {v} (must be 1-65535)")
         return v
@@ -158,7 +220,15 @@ class HeimdexConfig(BaseSettings):
     @field_validator("probe_timeout_ms")
     @classmethod
     def validate_probe_timeout(cls, v: int) -> int:
-        """Clamp probe timeout to reasonable range (50-5000ms)."""
+        """
+        Clamps the probe timeout to a reasonable range (50-5000ms).
+
+        Args:
+            v (int): The probe timeout in milliseconds.
+
+        Returns:
+            int: The clamped probe timeout.
+        """
         if v < 50:
             return 50
         if v > 5000:
@@ -168,7 +238,15 @@ class HeimdexConfig(BaseSettings):
     @field_validator("probe_retries")
     @classmethod
     def validate_probe_retries(cls, v: int) -> int:
-        """Clamp probe retries to reasonable range (0-5)."""
+        """
+        Clamps the probe retries to a reasonable range (0-5).
+
+        Args:
+            v (int): The number of probe retries.
+
+        Returns:
+            int: The clamped number of probe retries.
+        """
         if v < 0:
             return 0
         if v > 5:
@@ -178,7 +256,15 @@ class HeimdexConfig(BaseSettings):
     @field_validator("probe_cooldown_sec")
     @classmethod
     def validate_probe_cooldown(cls, v: int) -> int:
-        """Clamp probe cooldown to reasonable range (5-300s)."""
+        """
+        Clamps the probe cooldown to a reasonable range (5-300s).
+
+        Args:
+            v (int): The probe cooldown in seconds.
+
+        Returns:
+            int: The clamped probe cooldown.
+        """
         if v < 5:
             return 5
         if v > 300:
@@ -188,7 +274,15 @@ class HeimdexConfig(BaseSettings):
     @field_validator("probe_cache_sec")
     @classmethod
     def validate_probe_cache(cls, v: int) -> int:
-        """Clamp probe cache to reasonable range (1-60s)."""
+        """
+        Clamps the probe cache to a reasonable range (1-60s).
+
+        Args:
+            v (int): The probe cache duration in seconds.
+
+        Returns:
+            int: The clamped probe cache duration.
+        """
         if v < 1:
             return 1
         if v > 60:
@@ -197,34 +291,40 @@ class HeimdexConfig(BaseSettings):
 
     def get_database_url(self, driver: str = "postgresql+psycopg2") -> str:
         """
-        Construct SQLAlchemy database URL.
+        Constructs the SQLAlchemy database URL from the configuration.
 
         Args:
-            driver: SQLAlchemy driver string (default: postgresql+psycopg2)
+            driver (str): The SQLAlchemy driver string. Defaults to
+                "postgresql+psycopg2".
 
         Returns:
-            Complete database connection URL
+            str: The complete database connection URL.
         """
         return f"{driver}://{self.pguser}:{self.pgpassword}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
 
     def get_postgres_dsn(self) -> str:
         """
-        Construct PostgreSQL connection string for psycopg2.
+        Constructs the PostgreSQL connection string (DSN) for psycopg2.
 
         Returns:
-            PostgreSQL connection string
+            str: The PostgreSQL connection string.
         """
         return f"postgresql://{self.pguser}:{self.pgpassword}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
 
     def log_summary(self, redact_secrets: bool = True) -> dict[str, str]:
         """
-        Generate a redacted configuration summary for logging.
+        Generates a redacted configuration summary for logging.
+
+        This method provides a safe way to log the configuration by redacting
+        sensitive values like passwords.
 
         Args:
-            redact_secrets: If True, replace sensitive values with '***'
+            redact_secrets (bool): If True, sensitive values are replaced
+                with '***'. Defaults to True.
 
         Returns:
-            Dictionary of configuration values suitable for logging
+            dict[str, str]: A dictionary of configuration values suitable for
+                logging.
         """
         summary = {
             "environment": self.environment,
@@ -243,7 +343,15 @@ class HeimdexConfig(BaseSettings):
 
     @staticmethod
     def _redact_url(url: str) -> str:
-        """Redact password from URL."""
+        """
+        Redacts the password from a URL string.
+
+        Args:
+            url (str): The URL to redact.
+
+        Returns:
+            str: The redacted URL.
+        """
         if "@" in url and "://" in url:
             scheme, rest = url.split("://", 1)
             if "@" in rest:
@@ -260,16 +368,18 @@ _config: HeimdexConfig | None = None
 
 def get_config() -> HeimdexConfig:
     """
-    Get the global configuration instance.
+    Retrieves the global configuration instance.
 
-    This function uses a singleton pattern to ensure configuration is loaded only once
-    per process. It will raise errors if required environment variables are missing.
+    This function implements a singleton pattern to ensure that the
+    configuration is loaded only once per process. It lazy-loads the
+    configuration on the first call.
 
     Returns:
-        The global HeimdexConfig instance
+        HeimdexConfig: The global `HeimdexConfig` instance.
 
     Raises:
-        ValidationError: If required configuration values are missing or invalid
+        pydantic.ValidationError: If any required configuration values are
+            missing or invalid.
     """
     global _config
     if _config is None:
@@ -279,9 +389,10 @@ def get_config() -> HeimdexConfig:
 
 def reset_config() -> None:
     """
-    Reset the global configuration instance.
+    Resets the global configuration instance.
 
-    This function is primarily used for testing to force configuration reload.
+    This function is primarily used for testing to allow for reloading the
+    configuration with different settings in different test cases.
     """
     global _config
     _config = None

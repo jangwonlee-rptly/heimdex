@@ -1,4 +1,14 @@
-"""Database initialization script."""
+"""
+Database Initialization Script.
+
+This script provides a command-line interface for initializing the database schema.
+It is intended for use during development and deployment setup. For production
+environments, database migrations should be handled by a more robust tool like
+Alembic.
+
+This script should be run from the command line:
+    python -m heimdex_api.db_init
+"""
 
 from __future__ import annotations
 
