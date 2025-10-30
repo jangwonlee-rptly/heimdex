@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 import dramatiq
 from dramatiq.brokers.redis import RedisBroker
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from redis import Redis
 
+from heimdex_common.auth import RequestContext, verify_jwt
 from heimdex_common.db import get_db
 from heimdex_common.repositories import JobRepository
 
@@ -106,44 +107,46 @@ class JobStatusResponse(BaseModel):
 
 
 @router.post("", response_model=JobCreateResponse)
-async def create_job(request: JobCreateRequest) -> JobCreateResponse:
+async def create_job(
+    request: JobCreateRequest,
+    ctx: Annotated[RequestContext, Depends(verify_jwt)],
+) -> JobCreateResponse:
     """
     Creates and enqueues a new job for asynchronous processing.
 
     This endpoint serves as the primary entrypoint for initiating background
     tasks. It performs several key actions:
     1.  It creates a new job record in the database with an initial 'queued'
-        status, using the `JobRepository`.
+        status, using the `JobRepository`. The job is automatically scoped
+        to the authenticated user's organization.
     2.  It constructs a `dramatiq.Message` to be consumed by a background
         worker. This message contains the job ID and any parameters required
         by the worker task.
     3.  It enqueues the message using the configured Dramatiq broker, making
         it available for a worker to pick up.
 
-    A default organization ID is used for this single-tenant implementation.
-    This will be replaced with an authenticated organization ID in a future
-    multi-tenant setup.
+    The job is automatically associated with the requesting user's organization,
+    ensuring tenant isolation. Only users from the same organization will be
+    able to query this job's status.
 
     Args:
         request (JobCreateRequest): The request body containing the details
             for the job to be created. This includes the `type` of the job
             and an optional `fail_at_stage` parameter for testing purposes.
+        ctx (RequestContext): Authenticated request context containing user
+            and organization identity (injected via JWT verification).
 
     Returns:
         JobCreateResponse: A response object containing the unique identifier
             (`job_id`) of the newly created and enqueued job.
     """
-    # Default org_id for single-tenant setup
-    # TODO: Replace with actual org_id from authentication when multi-tenancy is implemented
-    default_org_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
-
-    # Create job using repository
+    # Create job using repository with authenticated org_id
     with get_db() as session:
         repo = JobRepository(session)
         job = repo.create_job(
-            org_id=default_org_id,
+            org_id=uuid.UUID(ctx.org_id),
             job_type=request.type,
-            requested_by=None,  # TODO: Add from authentication context
+            requested_by=ctx.user_id,
             priority=0,
         )
         job_id = str(job.id)
@@ -163,7 +166,10 @@ async def create_job(request: JobCreateRequest) -> JobCreateResponse:
 
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str) -> JobStatusResponse:
+async def get_job_status(
+    job_id: str,
+    ctx: Annotated[RequestContext, Depends(verify_jwt)],
+) -> JobStatusResponse:
     """
     Retrieves the current status and details of a specific job.
 
@@ -171,12 +177,18 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     returns a comprehensive overview of its current state. This includes its
     status, progress, stage, and any results or errors.
 
+    The endpoint enforces tenant isolation: users can only query jobs belonging
+    to their organization. Attempting to access a job from another organization
+    returns a 403 Forbidden error.
+
     The status mapping logic ensures that the job status values from the new
     `JobStatus` enum are backward-compatible with older clients.
 
     Args:
         job_id (str): The UUID of the job to retrieve, passed as a path
             parameter.
+        ctx (RequestContext): Authenticated request context containing user
+            and organization identity (injected via JWT verification).
 
     Returns:
         JobStatusResponse: A response object containing the detailed status
@@ -185,6 +197,8 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     Raises:
         HTTPException: A 404 Not Found error is raised if no job with the
             specified `job_id` is found in the database.
+        HTTPException: A 403 Forbidden error is raised if the job belongs
+            to a different organization than the authenticated user.
     """
     with get_db() as session:
         repo = JobRepository(session)
@@ -192,6 +206,13 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+
+        # Enforce tenant isolation: only allow access to jobs in the same org
+        if str(job.org_id) != ctx.org_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: job belongs to a different organization",
+            )
 
         # Get latest event for stage/progress/result information
         latest_event = repo.get_latest_job_event(job.id)

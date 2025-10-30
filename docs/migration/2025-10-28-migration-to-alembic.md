@@ -106,18 +106,18 @@ make readyz            # Check API readiness
 ### 5. Documentation
 
 **Files Created**:
-- `docs/db-schema.md` - Complete schema reference with audit trail
-- `docs/configuration.md` - Environment variables and configuration guide
-- `docs/2025-10-28-migration-to-alembic.md` - This file
+- `db-schema.md` - Complete schema reference with audit trail
+- `../development/configuration.md` - Environment variables and configuration guide
+- `2025-10-28-migration-to-alembic.md` - This file
 
 **Files Modified**:
-- `docs/architecture.md` - Updated schema section, added "Dependency Readiness" section
+- `../architecture/overview.md` - Updated schema section, added "Dependency Readiness" section
 
 ---
 
 ## Manual Testing Guide
 
-> ℹ️ See `docs/TESTING_MIGRATIONS.md` for a reusable container workflow (autogenerate → curate → upgrade → compile SQL).
+> ℹ️ See `testing-migrations.md` for a reusable container workflow (autogenerate → curate → upgrade → compile SQL).
 
 ### Prerequisites
 

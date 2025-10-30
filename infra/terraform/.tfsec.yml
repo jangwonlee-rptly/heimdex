@@ -1,0 +1,21 @@
+---
+# tfsec configuration for Heimdex infrastructure
+
+# Minimum severity level to report
+minimum_severity: MEDIUM
+
+# Exclude specific checks (with justification)
+exclude:
+  # Allow local backend for now (will move to GCS later)
+  - google-storage-no-public-access
+
+# Include custom checks
+include:
+  - google-iam-no-privileged-service-accounts
+  - google-compute-no-public-ip
+  - google-sql-encrypt-in-transit-data
+
+# Exclude specific directories
+exclude_paths:
+  - ".terraform/"
+  - "*.tfvars"

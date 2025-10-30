@@ -92,7 +92,7 @@ This document tracks the complete migration from raw psycopg2 database connectio
 **Defined in**: `packages/common/src/heimdex_common/models.py:29-170`
 **Migration**: `packages/common/alembic/versions/001_job_ledger_init.py`
 
-**Columns** (see docs/db-schema.md for full details):
+**Columns** (see db-schema.md for full details):
 - `id` UUID PRIMARY KEY
 - `org_id` UUID NOT NULL (NEW - for multi-tenancy)
 - `type` VARCHAR(100) NOT NULL (NEW - job type discriminator)

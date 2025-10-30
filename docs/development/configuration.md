@@ -90,6 +90,37 @@ These settings control the behavior of dependency health probes.
 
 **Caching**: Successful probes are cached for 10s, failed probes trigger a 30s cooldown to prevent probe storms.
 
+### Authentication
+
+Configuration for JWT-based authentication. See [auth.md](./auth.md) for detailed documentation.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `AUTH_PROVIDER` | string | `dev` | Authentication provider (`dev` for local, `supabase` for production) |
+| `DEV_JWT_SECRET` | string | `local-dev-secret` | JWT secret for dev mode (HS256 signing) |
+| `SUPABASE_JWKS_URL` | string | `None` | Supabase JWKS URL for RS256 verification (required when `AUTH_PROVIDER=supabase`) |
+| `AUTH_AUDIENCE` | string | `None` | Expected JWT audience claim (required when `AUTH_PROVIDER=supabase`) |
+| `AUTH_ISSUER` | string | `None` | Expected JWT issuer claim (required when `AUTH_PROVIDER=supabase`) |
+
+**Security Rules**:
+- Dev mode (`AUTH_PROVIDER=dev`) is **automatically disabled** when `HEIMDEX_ENV=prod`
+- Supabase mode requires all three Supabase-related variables
+- Secrets are **never logged** (automatically redacted)
+
+**Example - Dev Mode** (local development):
+```bash
+AUTH_PROVIDER=dev
+DEV_JWT_SECRET=local-dev-secret
+```
+
+**Example - Supabase Mode** (production):
+```bash
+AUTH_PROVIDER=supabase
+SUPABASE_JWKS_URL=https://abc123.supabase.co/auth/v1/jwks
+AUTH_AUDIENCE=heimdex
+AUTH_ISSUER=https://abc123.supabase.co/
+```
+
 ---
 
 ## Configuration Files

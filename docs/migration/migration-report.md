@@ -52,12 +52,12 @@ This migration successfully transitions the Heimdex codebase from raw psycopg2 d
      - Queue management queries
      - Statistics aggregation
 
-3. **docs/migration_inventory.md** (NEW)
+3. **migration-inventory.md** (NEW)
    - Complete migration audit and tracking document
    - Schema mapping documentation
    - Risk assessment and mitigation strategies
 
-4. **docs/MIGRATION_REPORT.md** (THIS FILE)
+4. **migration-report.md** (THIS FILE)
 
 ### Modified Files
 

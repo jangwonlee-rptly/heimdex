@@ -198,6 +198,33 @@ class HeimdexConfig(BaseSettings):
         description="Cache duration for successful probes (seconds)",
     )
 
+    # Authentication configuration
+    auth_provider: Literal["supabase", "dev"] = Field(
+        default="dev",
+        alias="AUTH_PROVIDER",
+        description="Authentication provider (supabase for prod, dev for local)",
+    )
+    supabase_jwks_url: str | None = Field(
+        default=None,
+        alias="SUPABASE_JWKS_URL",
+        description="Supabase JWKS URL for JWT verification",
+    )
+    auth_audience: str | None = Field(
+        default=None,
+        alias="AUTH_AUDIENCE",
+        description="Expected JWT audience claim",
+    )
+    auth_issuer: str | None = Field(
+        default=None,
+        alias="AUTH_ISSUER",
+        description="Expected JWT issuer claim",
+    )
+    dev_jwt_secret: str = Field(
+        default="local-dev-secret",
+        alias="DEV_JWT_SECRET",
+        description="JWT secret for dev mode (HS256)",
+    )
+
     @field_validator("pgport")
     @classmethod
     def validate_pgport(cls, v: int) -> int:
@@ -288,6 +315,37 @@ class HeimdexConfig(BaseSettings):
         if v > 60:
             return 60
         return v
+
+    def model_post_init(self, __context: object) -> None:
+        """
+        Validate auth configuration after all fields are loaded.
+
+        Raises:
+            ValueError: If auth_provider=supabase but required fields are missing,
+                       or if auth_provider=dev in production environment.
+        """
+        # Prevent dev auth in production
+        if self.auth_provider == "dev" and self.environment == "prod":
+            raise ValueError(
+                "AUTH_PROVIDER=dev is not allowed in production (HEIMDEX_ENV=prod). "
+                "Use AUTH_PROVIDER=supabase with valid credentials."
+            )
+
+        # Require Supabase fields when using Supabase auth
+        if self.auth_provider == "supabase":
+            missing_fields = []
+            if not self.supabase_jwks_url:
+                missing_fields.append("SUPABASE_JWKS_URL")
+            if not self.auth_audience:
+                missing_fields.append("AUTH_AUDIENCE")
+            if not self.auth_issuer:
+                missing_fields.append("AUTH_ISSUER")
+
+            if missing_fields:
+                raise ValueError(
+                    f"AUTH_PROVIDER=supabase requires the following fields: "
+                    f"{', '.join(missing_fields)}"
+                )
 
     def get_database_url(self, driver: str = "postgresql+psycopg2") -> str:
         """

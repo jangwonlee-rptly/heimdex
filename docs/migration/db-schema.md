@@ -219,5 +219,5 @@ All database objects follow these conventions to ensure Alembic autogenerate sta
 
 - Alembic env: `packages/common/alembic/env.py`
 - SQLAlchemy models: `packages/common/src/heimdex_common/models.py`
-- Configuration: `docs/configuration.md`
-- Architecture: `docs/architecture.md`
+- Configuration: `../development/configuration.md`
+- Architecture: `../architecture/overview.md`

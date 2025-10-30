@@ -56,7 +56,7 @@ Heimdex uses **Dramatiq** with Redis as the message broker to handle long-runnin
 - `next_status` (VARCHAR): Status after transition
 - `detail_json` (JSONB): Additional metadata (stage, progress, error details)
 
-See `docs/db-schema.md` for full schema reference including indexes and constraints.
+See `../migration/db-schema.md` for full schema reference including indexes and constraints.
 
 ### Retry Strategy
 
@@ -230,6 +230,94 @@ Each enabled probe:
 - **Manual debugging**: `curl http://localhost:8000/readyz | jq`
 - **CI/CD**: Healthcheck script before running integration tests
 - **Add new dependency**: Set `ENABLE_<DEP>=true` in `.env`, restart services
+
+## Authentication & Tenancy
+
+### JWT-Based Authentication
+
+Heimdex uses JWT tokens for authentication with two modes:
+
+**Dev Mode** (local development):
+- Provider: `AUTH_PROVIDER=dev`
+- Algorithm: HS256 (symmetric)
+- Secret: Configured via `DEV_JWT_SECRET`
+- **Security**: Automatically disabled when `HEIMDEX_ENV=prod`
+
+**Supabase Mode** (production):
+- Provider: `AUTH_PROVIDER=supabase`
+- Algorithm: RS256 (asymmetric)
+- Verification: Public keys from JWKS endpoint
+- Required claims: `aud`, `iss`, `sub`, `org_id`
+
+See [auth.md](./auth.md) for detailed documentation.
+
+### Request Context
+
+All authenticated API requests inject a `RequestContext`:
+
+```python
+@dataclass
+class RequestContext:
+    user_id: str      # From JWT 'sub' claim
+    org_id: str       # From JWT custom claim
+    role: str | None  # Optional role claim
+```
+
+**Usage in routes**:
+```python
+from heimdex_common.auth import RequestContext, verify_jwt
+
+@router.post("/jobs")
+async def create_job(
+    request: JobCreateRequest,
+    ctx: RequestContext = Depends(verify_jwt),
+):
+    # Automatically scoped to ctx.org_id
+    job = repo.create_job(org_id=ctx.org_id, ...)
+```
+
+### Tenant Isolation
+
+**Enforcement Strategy**:
+1. **Creation**: Resources created with authenticated `org_id`
+2. **Retrieval**: Cross-tenant access returns HTTP 403
+3. **Queries**: Database queries filtered by `org_id`
+
+**Example - Job Retrieval**:
+```python
+job = repo.get_job_by_id(job_id)
+
+# Enforce tenant boundary
+if str(job.org_id) != ctx.org_id:
+    raise HTTPException(status_code=403, detail="Access denied")
+```
+
+**Future Enhancement**: Row-Level Security (RLS) in PostgreSQL for defense-in-depth.
+
+### Organization Claim Locations
+
+The middleware checks for `org_id` in order of precedence:
+
+1. `app_metadata.org_id` (Supabase pattern)
+2. `https://heimdex.io/org_id` (custom namespace)
+3. `org_id` (direct claim)
+
+**Supabase Configuration**:
+Set `org_id` in user metadata via SQL trigger:
+
+```sql
+CREATE OR REPLACE FUNCTION set_org_id()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.raw_app_meta_data = jsonb_set(
+    COALESCE(NEW.raw_app_meta_data, '{}'::jsonb),
+    '{org_id}',
+    to_jsonb(NEW.id::text)
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
 
 ## Health & Operations
 

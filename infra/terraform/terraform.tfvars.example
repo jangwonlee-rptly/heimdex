@@ -1,0 +1,22 @@
+# GCP Project Configuration
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+
+# Environment
+environment = "dev"
+
+# Docker Image Tags
+api_image_tag    = "latest"
+worker_image_tag = "latest"
+
+# Scaling (0 for scale-to-zero)
+api_min_instances    = 0
+worker_min_instances = 0
+
+# Secrets (DO NOT commit actual secrets!)
+dev_jwt_secret = "change-me-in-production"
+
+# Cost optimization flags (disabled by default)
+enable_cloudsql      = false
+enable_redis         = false
+enable_vpc_connector = false

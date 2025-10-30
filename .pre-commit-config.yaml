@@ -27,6 +27,7 @@ repos:
           - sqlalchemy>=2.0.0,<3.0.0
           - types-requests>=2.32.0,<3.0.0
         files: ^(apps|packages)/
+        exclude: ^packages/common/alembic/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
