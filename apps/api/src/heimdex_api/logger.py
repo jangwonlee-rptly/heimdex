@@ -1,13 +1,23 @@
 """
-Structured Logging Utilities for the Heimdex API Service.
+Structured JSON Logging Utilities for the Heimdex API Service.
 
-This module provides a standardized way to emit structured JSON logs. Using
-JSON logs allows for easier parsing, filtering, and analysis by logging
-platforms (e.g., Datadog, Splunk).
+This module provides a simple yet powerful utility for emitting structured logs in
+a consistent JSON format. In a modern, distributed system, logs are not just for
+human consumption; they are a critical source of machine-readable data for
+monitoring, alerting, and analytics platforms (e.g., Datadog, Splunk, ELK Stack).
 
-The `log_event` function is the primary entrypoint, which automatically
-enriches log records with service-wide context such as the service name,
-environment, and version.
+Why Structured JSON Logging?
+- **Parsability**: JSON is a standard, unambiguous format that is easily parsed
+  by virtually all log management tools. This eliminates the need for complex and
+  brittle regex-based parsing of traditional log strings.
+- **Search and Filtering**: When logs are structured with key-value pairs, it
+  becomes trivial to search and filter them. For example, you can easily find
+  all log entries for a specific `job_id` or all `ERROR` level logs with a
+  certain `duration_ms`.
+- **Automatic Enrichment**: This logger automatically enriches every log record
+  with essential service context (`service` name, `env`, `version`), which is
+  vital for distinguishing logs from different services in a centralized logging
+  environment.
 """
 
 from __future__ import annotations
@@ -20,55 +30,71 @@ from typing import Any
 
 from . import SERVICE_NAME, __version__
 
+# The deployment environment, loaded from an environment variable.
 _ENV = os.getenv("HEIMDEX_ENV", "local")
+# A set of valid log levels to ensure that all log entries have a recognized severity.
 _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
 def _normalize_level(level: str) -> str:
     """
-    Normalizes a log level to a valid, uppercase string.
+    Ensures that a log level is a valid, uppercase string.
 
-    This function ensures that the provided log level is one of the recognized
-    levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). If the level is
-    not valid, it defaults to `INFO` to prevent invalid log entries.
+    This helper function provides a layer of robustness by guaranteeing that
+    the `level` field in the final JSON log is always one of the predefined,
+    standard levels. If an invalid level is provided, it defaults to `INFO`.
 
     Args:
-        level (str): The log level string to normalize.
+        level: The log level string to be normalized.
 
     Returns:
-        str: The normalized, uppercase log level.
+        The normalized, uppercase log level string.
     """
     level_upper = level.upper()
-    if level_upper not in _VALID_LEVELS:
-        return "INFO"
-    return level_upper
+    return level_upper if level_upper in _VALID_LEVELS else "INFO"
 
 
 def log_event(level: str, msg: str, **fields: Any) -> None:
     """
     Emits a structured, single-line JSON log entry to standard output.
 
-    This is the primary logging function for the service. It constructs a JSON
-    log record containing a timestamp, service context, log level, a primary
-    message, and any additional structured fields provided as keyword arguments.
+    This is the primary logging function that should be used throughout the API
+    service. It assembles a Python dictionary, populates it with standard,
+    contextual fields and any custom fields, and then serializes it to a compact
+    JSON string that is printed to stdout.
 
-    The log record is automatically enriched with the following fields:
-    -   `ts`: The ISO 8601 timestamp in UTC.
-    -   `service`: The name of the service (e.g., "api").
-    -   `env`: The deployment environment (e.g., "local", "prod").
-    -   `version`: The version of the service.
-    -   `level`: The normalized log level.
-    -   `msg`: The primary log message.
+    Standard Fields Automatically Included:
+    - `ts`: An ISO 8601 timestamp in UTC, providing a consistent timezone.
+    - `service`: The name of this service ("api").
+    - `env`: The deployment environment ("local", "prod", etc.).
+    - `version`: The semantic version of the running service.
+    - `level`: The normalized log severity.
+    - `msg`: The primary, human-readable log message.
+
+    Example Usage:
+    ```python
+    log_event(
+        "INFO",
+        "job_created",
+        job_id="a-b-c-d",
+        job_type="video_processing",
+        user_id="user-123"
+    )
+    ```
+
+    This would produce a JSON log similar to:
+    ```json
+    {"ts":"...", "service":"api", "env":"local", "version":"0.1.0", "level":"INFO",
+     "msg":"job_created", "job_id":"a-b-c-d", "job_type":"video_processing",
+     "user_id":"user-123"}
+    ```
 
     Args:
-        level (str): The severity level of the log (e.g., "INFO", "ERROR").
-            This will be normalized to a valid level.
-        msg (str): The primary, human-readable log message.
-        **fields (Any): Arbitrary keyword arguments that will be included as
-            structured fields in the JSON log entry. This is useful for
-            adding context to the log, such as `job_id` or `duration_ms`.
+        level: The severity level of the log (e.g., "INFO", "ERROR").
+        msg: The primary, human-readable log message.
+        **fields: Arbitrary keyword arguments that will be added as key-value
+                  pairs to the root of the JSON log object.
     """
-
     record = {
         "ts": datetime.now(UTC).isoformat(),
         "service": SERVICE_NAME,
@@ -77,5 +103,9 @@ def log_event(level: str, msg: str, **fields: Any) -> None:
         "level": _normalize_level(level),
         "msg": msg,
     }
+    # Add any custom fields provided by the caller.
     record.update(fields)
+    # Use `separators` to create a compact JSON string, and `flush=True` to
+    # ensure the log is written immediately, which is important in containerized
+    # environments.
     print(json.dumps(record, separators=(",", ":")), file=sys.stdout, flush=True)

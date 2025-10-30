@@ -1,12 +1,17 @@
 """
-Entrypoint for the Heimdex API Service.
+The Main Entrypoint for the Heimdex FastAPI Service.
 
-This module initializes the FastAPI application, registers routers, and sets up
-middleware for logging and request handling. It also defines the health and
-readiness check endpoints.
-
-The application startup and shutdown events are handled here to manage the
-application lifecycle, including logging and database connection setup.
+This module is the central hub of the API service. It is responsible for:
+1.  **Initializing the FastAPI Application**: Creating the main `app` instance.
+2.  **Registering Routers**: Including all the different API route modules (like
+    the one for jobs) into the main application.
+3.  **Setting Up Middleware**: Attaching middleware for cross-cutting concerns,
+    such as logging every incoming HTTP request.
+4.  **Managing Application Lifecycle**: Defining logic that runs on application
+    startup (e.g., loading configuration, logging a start message) and shutdown.
+5.  **Defining Core Health Endpoints**: Providing `/healthz` (liveness) and
+    `/readyz` (readiness) endpoints, which are essential for running the service
+    in a container orchestration system like Kubernetes.
 """
 
 from __future__ import annotations
@@ -23,82 +28,85 @@ from . import SERVICE_NAME, __version__
 from .jobs import router as jobs_router
 from .logger import log_event
 
+# --- Global Service Metadata ---
 _ENV = os.getenv("HEIMDEX_ENV", "local")
 _STARTED_AT = datetime.now(UTC)
 _STARTED_AT_ISO = _STARTED_AT.isoformat()
 
-app = FastAPI(title="Heimdex API", version=__version__)
+# --- FastAPI Application Initialization ---
+app = FastAPI(
+    title="Heimdex API",
+    version=__version__,
+    # These parameters are used to generate the OpenAPI documentation (e.g., at /docs).
+)
+
+# Include the router from the `jobs` module. This is a key part of FastAPI's
+# modular design, allowing us to organize endpoints into different files.
 app.include_router(jobs_router)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
     """
-    Handles application startup events.
+    Handles application startup logic.
 
-    This function is executed when the FastAPI application starts. It performs
-    the following actions:
-    1.  Loads the application configuration using `get_config`.
-    2.  Logs a structured startup message, including the environment, start
-        time, and a redacted summary of the configuration for security.
-
-    This is the appropriate place to initialize resources that should exist
-    for the lifetime of the application, such as database connection pools.
+    This function is a FastAPI event handler that is executed once when the
+    server process starts. It is the ideal place for initialization tasks that
+    should happen before the server begins accepting requests. Here, we use it
+    to log a structured message indicating that the service has started, along
+    with its configuration. This is invaluable for debugging deployments.
     """
     from heimdex_common.config import get_config
 
     config = get_config()
     log_event(
         "INFO",
-        "starting",
-        env=_ENV,
-        started_at=_STARTED_AT_ISO,
-        config=config.log_summary(redact_secrets=True),
+        "service_startup",
+        details={
+            "env": _ENV,
+            "started_at": _STARTED_AT_ISO,
+            "config_summary": config.log_summary(redact_secrets=True),
+        },
     )
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     """
-    Handles application shutdown events.
+    Handles application shutdown logic.
 
-    This function is executed when the FastAPI application is shutting down.
-    It logs a simple 'stopping' message to indicate that the service is
-    terminating gracefully. This is useful for monitoring and debugging
-    service lifecycle events.
+    This event handler is executed just before the server stops. It's used here
+    to log a clean shutdown message. In more complex applications, this is where
+    you would gracefully close database connections, flush buffers, or perform
+    other cleanup tasks.
     """
-    log_event("INFO", "stopping")
+    log_event("INFO", "service_shutdown")
 
 
 @app.middleware("http")
-async def request_logger(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
+async def request_logger(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """
-    Logs incoming HTTP requests and their processing time.
+    A middleware that logs every incoming HTTP request and its response.
 
-    This FastAPI middleware intercepts every incoming request. It records the
-    time before passing the request to the next handler and then calculates
-    the total processing duration after the response is generated.
-
-    The log entry includes the HTTP method, URL path, status code, and the
-    duration in milliseconds.
+    Middleware in FastAPI is a powerful way to process every request before it
+    hits the endpoint and every response before it's sent to the client. This
+    function implements a logger that provides visibility into the API's traffic,
+    capturing key information like the request path, method, response status code,
+    and, crucially, the processing duration. This is a cornerstone of observability.
 
     Args:
-        request (Request): The incoming FastAPI request object.
-        call_next (Callable[[Request], Awaitable[Response]]): A function that
-            passes the request to the next middleware or endpoint in the chain.
+        request: The incoming HTTP request.
+        call_next: The function that passes the request to the next handler.
 
     Returns:
-        Response: The response generated by the endpoint, which is passed
-            through the middleware chain.
+        The HTTP response generated by the endpoint.
     """
-    start = time.perf_counter()
+    start_time = time.perf_counter()
     response = await call_next(request)
-    duration_ms = (time.perf_counter() - start) * 1000
+    duration_ms = (time.perf_counter() - start_time) * 1000
     log_event(
         "INFO",
-        "request",
+        "http_request",
         method=request.method,
         path=request.url.path,
         status_code=response.status_code,
@@ -107,52 +115,48 @@ async def request_logger(
     return response
 
 
-@app.get("/healthz", response_class=JSONResponse)
+@app.get("/healthz", tags=["health"], response_class=JSONResponse)
 async def healthz() -> JSONResponse:
     """
-    Performs a basic health check.
+    Provides a basic liveness probe endpoint.
 
-    This endpoint provides a simple, fast way to verify that the API service
-    is running and responsive. It returns a JSON response with the service's
-    status, version, environment, and start time.
+    In container orchestration systems like Kubernetes, a liveness probe is used
+    to determine if a container's main process is running and responsive. If this
+    endpoint fails to respond, the orchestrator will assume the container is
+    "dead" and restart it.
 
-    This endpoint does not check the status of external dependencies like the
-    database or message queue. For a comprehensive check, use the `/readyz`
-    endpoint.
+    Therefore, this endpoint should be very simple and fast. It does **not** check
+    external dependencies. It simply confirms that the HTTP server is up.
 
     Returns:
-        JSONResponse: A JSON response containing the health check information,
-            including a `{"ok": True}` status.
+        A JSON response indicating the service is alive ("ok": True).
     """
     payload = {
-        "ok": True,
-        "service": SERVICE_NAME,
-        "version": __version__,
-        "env": _ENV,
-        "started_at": _STARTED_AT_ISO,
+        "ok": True, "service": SERVICE_NAME, "version": __version__,
+        "env": _ENV, "started_at": _STARTED_AT_ISO,
     }
     return JSONResponse(content=payload)
 
 
-@app.get("/readyz", response_class=JSONResponse)
+@app.get("/readyz", tags=["health"], response_class=JSONResponse)
 async def readyz() -> JSONResponse:
     """
-    Performs a profile-aware readiness check with dependency probes.
+    Provides a comprehensive readiness probe endpoint.
 
-    This endpoint is used to determine if the service is ready to accept
-    traffic. It checks the status of all critical, enabled dependencies, such
-    as the database and Redis. The check is profile-aware, meaning it only
-    probes dependencies that are enabled via the `ENABLE_*` configuration flags.
+    A readiness probe is used to determine if a container is ready to start
+    accepting traffic. This is a more in-depth check than the liveness probe. It
+    verifies the health of all critical downstream dependencies (like the database
+    and Redis) using the profile-aware `check_readiness` function from the common
+    probes module.
 
-    If all enabled dependencies are healthy, it returns a 200 OK response.
-    If any enabled dependency is down, it returns a 503 Service Unavailable
-    response, signaling to orchestration systems (like Kubernetes) that the
-    service is not ready.
+    If any *enabled* dependency is unhealthy, this endpoint will return an
+    HTTP 503 Service Unavailable status. This signals to the orchestrator (or
+    load balancer) that it should not route traffic to this instance of the
+agb service until the dependencies are healthy again.
 
     Returns:
-        JSONResponse: A detailed JSON response with the readiness status of
-            the service and each of its dependencies. The HTTP status code
-            will be 200 if ready, and 503 if not.
+        A detailed JSON response on the status of all dependencies. The HTTP
+        status code will be 200 if ready, or 503 if not.
     """
     from heimdex_common.probes import check_readiness
 

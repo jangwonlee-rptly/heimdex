@@ -1,10 +1,12 @@
 """
-Repository for Job and JobEvent Data Access.
+Repository for Job and JobEvent Data Access Logic.
 
-This module provides the `JobRepository` class, which encapsulates the data
-access logic for the `Job` and `JobEvent` models. It provides a clean and
-consistent interface for creating, retrieving, and updating job-related
-data in the database.
+This module defines the `JobRepository`, which serves as a dedicated data
+access layer for the `Job` and `JobEvent` models. It implements the Repository
+Pattern, which means it encapsulates all the SQLAlchemy-specific query and
+data manipulation logic. This creates a clean separation of concerns, where the
+rest of the application can interact with job-related data through a simple,
+domain-focused API, without needing to know about the underlying database details.
 """
 
 from __future__ import annotations
@@ -22,23 +24,30 @@ from ..models import Job, JobEvent, JobStatus
 
 class JobRepository:
     """
-    Manages database operations for the `Job` and `JobEvent` models.
+    Manages all database operations for the `Job` and `JobEvent` models.
 
-    This repository provides a clean abstraction over the SQLAlchemy models,
-    ensuring that all data access follows consistent patterns and that
-    business logic related to data manipulation is centralized.
+    This repository provides a high-level, abstracted interface for all
+    Create, Read, Update, and Delete (CRUD) operations related to jobs. By
+    channeling all data access through this class, we ensure that business
+    rules are consistently applied, and the data remains in a valid state.
 
-    Attributes:
-        session (Session): The SQLAlchemy session for database operations.
+    An instance of this class is typically created with a specific SQLAlchemy
+    `Session` object, meaning that all operations performed by a single
+    repository instance will be part of the same database transaction.
     """
 
     def __init__(self, session: Session):
         """
-        Initializes the repository with a SQLAlchemy session.
+        Initializes the repository with a specific database session.
+
+        The repository is designed to be short-lived, typically created for a
+        single request or unit of work. It is injected with an active SQLAlchemy
+        session, which it uses to execute all its database operations.
 
         Args:
-            session (Session): An active SQLAlchemy session to be used for
-                database operations.
+            session: An active SQLAlchemy session. All operations within this
+                     repository instance will be bound to this session's
+                     transaction.
         """
         self.session = session
 
@@ -51,230 +60,170 @@ class JobRepository:
         priority: int = 0,
     ) -> Job:
         """
-        Creates a new job in the 'queued' state.
+        Atomically creates a new job and its initial creation event.
 
-        This method creates a new `Job` instance and its initial `JobEvent`.
+        This method encapsulates the logic for creating a new `Job` in the
+        `QUEUED` state. Crucially, it also creates the first `JobEvent`,
+        ensuring that the job's audit trail begins at the moment of creation.
 
         Args:
-            org_id (uuid.UUID): The organization/tenant identifier.
-            job_type (str): The job type discriminator (e.g.,
-                'mock_process').
-            idempotency_key (str | None): An optional client-provided key for
-                deduplication.
-            requested_by (str | None): An optional user or service attribution.
-            priority (int): The job priority (higher is more urgent).
+            org_id: The UUID of the organization this job belongs to.
+            job_type: A string identifier for the type of work to be done.
+            idempotency_key: An optional, client-provided key that, when used
+                             with the unique constraint in the `Job` model,
+                             prevents the creation of duplicate jobs.
+            requested_by: Optional metadata about the user or service that
+                          initiated the job.
+            priority: The job's priority (higher values are processed first).
 
         Returns:
-            Job: The newly created `Job` instance.
+            The newly created and persisted `Job` instance.
 
         Raises:
-            sqlalchemy.exc.IntegrityError: If the `idempotency_key` already
-                exists for the given `org_id`.
+            sqlalchemy.exc.IntegrityError: If the `idempotency_key` is not
+                unique for the given `org_id`, the database will raise this
+                error, which the calling service can handle gracefully.
         """
         job = Job(
             id=uuid.uuid4(),
             org_id=org_id,
             type=job_type,
             status=JobStatus.QUEUED,
-            attempt=0,
-            priority=priority,
             idempotency_key=idempotency_key,
             requested_by=requested_by,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
+            priority=priority,
         )
         self.session.add(job)
-        self.session.flush()  # Get ID without committing transaction
+        # We flush the session here to ensure the job's ID is generated by the
+        # database and available for the subsequent event logging, all within
+        # the same transaction.
+        self.session.flush()
 
-        # Log initial job event
         self.log_job_event(
             job_id=job.id,
             prev_status=None,
             next_status=JobStatus.QUEUED.value,
-            detail_json=None,
         )
 
         return job
 
     def get_job_by_id(self, job_id: uuid.UUID) -> Job | None:
-        """
-        Retrieves a job by its unique identifier.
-
-        Args:
-            job_id (uuid.UUID): The UUID of the job to retrieve.
-
-        Returns:
-            Job | None: The `Job` instance if found, otherwise `None`.
-        """
+        """Retrieves a single job by its primary key."""
         stmt = select(Job).where(Job.id == job_id)
         return self.session.execute(stmt).scalar_one_or_none()
 
     def get_job_with_events(self, job_id: uuid.UUID) -> Job | None:
         """
-        Retrieves a job with all of its events eagerly loaded.
+        Retrieves a job and eagerly loads its entire event history.
+
+        This method is useful when you need to display the full lifecycle of a
+        job. It uses `selectinload` to issue a second, efficient query to fetch
+        all related events, avoiding the "N+1 query problem".
 
         Args:
-            job_id (uuid.UUID): The UUID of the job to retrieve.
+            job_id: The UUID of the job to retrieve.
 
         Returns:
-            Job | None: The `Job` instance with its `events` relationship
-                populated, or `None` if the job is not found.
+            The `Job` instance with its `events` attribute pre-populated, or
+            `None` if not found.
         """
         stmt = select(Job).options(selectinload(Job.events)).where(Job.id == job_id)
         return self.session.execute(stmt).scalar_one_or_none()
 
     def get_latest_job_event(self, job_id: uuid.UUID) -> JobEvent | None:
-        """
-        Gets the most recent event for a given job.
-
-        Args:
-            job_id (uuid.UUID): The UUID of the job.
-
-        Returns:
-            JobEvent | None: The latest `JobEvent` instance, or `None` if the
-                job has no events.
-        """
-        stmt = (
-            select(JobEvent).where(JobEvent.job_id == job_id).order_by(desc(JobEvent.ts)).limit(1)
-        )
+        """Efficiently retrieves only the most recent event for a given job."""
+        stmt = select(JobEvent).where(JobEvent.job_id == job_id).order_by(desc(JobEvent.ts)).limit(1)
         return self.session.execute(stmt).scalar_one_or_none()
 
     def update_job_status(
         self,
         job_id: uuid.UUID,
-        status: str | None = None,
+        status: JobStatus,
         last_error_code: str | None = None,
         last_error_message: str | None = None,
-        started_at: datetime | None = None,
-        finished_at: datetime | None = None,
         log_event: bool = True,
         event_detail: dict[str, Any] | None = None,
     ) -> None:
         """
-        Updates a job's status and related fields.
+        Updates a job's status and logs a corresponding state transition event.
 
-        This method handles both the update of the `Job` record and the
-        logging of a corresponding `JobEvent` in a single operation to
-        maintain data consistency.
+        This is a critical transactional method. It ensures that any change to
+        a job's state is recorded in the immutable `JobEvent` log.
 
         Args:
-            job_id (uuid.UUID): The UUID of the job to update.
-            status (str | None): The new status value.
-            last_error_code (str | None): An error classification code.
-            last_error_message (str | None): A human-readable error message.
-            started_at (datetime | None): The timestamp of when job execution
-                started.
-            finished_at (datetime | None): The timestamp of when the job
-                reached a terminal state.
-            log_event (bool): Whether to log a `JobEvent`. Defaults to `True`.
-            event_detail (dict[str, Any] | None): Additional event metadata.
+            job_id: The ID of the job to update.
+            status: The new `JobStatus` for the job.
+            last_error_code: A machine-readable error code, if the job failed.
+            last_error_message: A human-readable error message.
+            log_event: If `True`, a `JobEvent` is created for the transition.
+            event_detail: Rich, structured data to include in the event log.
 
         Raises:
-            ValueError: If the job with the specified `job_id` is not found.
+            ValueError: If the specified job does not exist.
         """
         job = self.get_job_by_id(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
         prev_status = job.status
-        status_enum: JobStatus | None = None
+        if prev_status == status:
+            return  # No status change, nothing to do
 
-        # Update job fields
-        if status is not None:
-            status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
-            job.status = status_enum
-        if last_error_code is not None:
-            job.last_error_code = last_error_code
-        if last_error_message is not None:
-            job.last_error_message = last_error_message[:2048]
-        if started_at is not None:
-            job.started_at = started_at
-        if finished_at is not None:
-            job.finished_at = finished_at
-
-        # Always update updated_at
+        job.status = status
         job.updated_at = datetime.now(UTC)
+        job.last_error_code = last_error_code
+        job.last_error_message = last_error_message[:2048] if last_error_message else None
 
-        self.session.flush()
+        if status == JobStatus.RUNNING and job.started_at is None:
+            job.started_at = datetime.now(UTC)
+        if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.DEAD_LETTER}:
+            job.finished_at = datetime.now(UTC)
 
-        # Log event if status changed and logging enabled
-        if log_event and status_enum is not None and prev_status != status_enum:
+        if log_event:
             self.log_job_event(
                 job_id=job_id,
-                prev_status=(
-                    prev_status.value if isinstance(prev_status, JobStatus) else prev_status
-                ),
-                next_status=status_enum.value,
+                prev_status=prev_status.value,
+                next_status=status.value,
                 detail_json=event_detail,
             )
 
     def update_job_with_stage_progress(
         self,
         job_id: uuid.UUID,
-        status: str | None = None,
-        stage: str | None = None,
-        progress: int | None = None,
-        result: dict[str, Any] | None = None,
-        error: str | None = None,
+        stage: str,
+        progress: int,
+        status: JobStatus | None = None,
     ) -> None:
         """
-        Updates a job with stage and progress information.
+        Logs a progress update event without necessarily changing the job's main status.
 
-        This method is a convenience wrapper around `update_job_status` that
-        provides backward compatibility with older schemas by storing stage,
-        progress, and result in the `JobEvent` log.
+        This is useful for long-running jobs that have multiple internal stages
+        (e.g., "downloading", "transcoding", "indexing"). It creates a `JobEvent`
+        to record this progress without altering the job's primary `RUNNING` status.
 
         Args:
-            job_id (uuid.UUID): The UUID of the job to update.
-            status (str | None): The new status value.
-            stage (str | None): The current processing stage.
-            progress (int | None): The progress percentage (0-100).
-            result (dict[str, Any] | None): The job's result data.
-            error (str | None): An error message.
-
-        Raises:
-            ValueError: If the job with the specified `job_id` is not found.
+            job_id: The ID of the job to update.
+            stage: A string describing the current processing stage.
+            progress: A progress indicator, typically a percentage (0-100).
+            status: An optional new status for the job. If `None`, the status
+                    is not changed, and this is treated as a pure progress update.
         """
         job = self.get_job_by_id(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        # Build event detail from stage/progress/result
-        event_detail: dict[str, Any] = {}
-        if stage is not None:
-            event_detail["stage"] = stage
-        if progress is not None:
-            event_detail["progress"] = progress
-        if result is not None:
-            event_detail["result"] = result
+        event_detail = {"stage": stage, "progress": progress}
 
-        status_enum = None
-        if status is not None:
-            status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
-
-        # Set timestamps based on status transitions
-        started_at = None
-        finished_at = None
-        if status_enum == JobStatus.RUNNING and job.status != JobStatus.RUNNING:
-            started_at = datetime.now(UTC)
-        if status_enum in {
-            JobStatus.SUCCEEDED,
-            JobStatus.FAILED,
-            JobStatus.CANCELED,
-            JobStatus.DEAD_LETTER,
-        }:
-            finished_at = datetime.now(UTC)
-
-        # Update job
-        self.update_job_status(
-            job_id=job_id,
-            status=status_enum.value if status_enum is not None else None,
-            last_error_message=error,
-            started_at=started_at,
-            finished_at=finished_at,
-            log_event=True,
-            event_detail=event_detail if event_detail else None,
-        )
+        if status and job.status != status:
+            self.update_job_status(job_id, status, log_event=True, event_detail=event_detail)
+        else:
+            # If status is not changing, just log a progress event.
+            self.log_job_event(
+                job_id=job_id,
+                prev_status=job.status.value,
+                next_status=job.status.value,
+                detail_json=event_detail,
+            )
 
     def log_job_event(
         self,
@@ -284,16 +233,13 @@ class JobRepository:
         detail_json: dict[str, Any] | None = None,
     ) -> JobEvent:
         """
-        Creates an immutable audit log entry for a job state transition.
+        Creates and persists a new `JobEvent` record.
 
-        Args:
-            job_id (uuid.UUID): The UUID of the parent job.
-            prev_status (str | None): The status before the transition.
-            next_status (str): The status after the transition.
-            detail_json (dict[str, Any] | None): Additional event metadata.
+        This method provides a direct way to add an entry to the immutable
+        audit log for a job.
 
         Returns:
-            JobEvent: The created `JobEvent` instance.
+            The newly created `JobEvent` instance.
         """
         event = JobEvent(
             id=uuid.uuid4(),
@@ -307,22 +253,16 @@ class JobRepository:
         self.session.flush()
         return event
 
-    def get_queued_jobs(
-        self,
-        org_id: uuid.UUID,
-        limit: int = 10,
-        job_type: str | None = None,
-    ) -> Sequence[Job]:
+    def get_queued_jobs(self, org_id: uuid.UUID, limit: int = 10, job_type: str | None = None) -> Sequence[Job]:
         """
-        Retrieves queued jobs, ordered by priority and creation time.
+        Fetches a batch of queued jobs, ready for processing by a worker.
 
-        Args:
-            org_id (uuid.UUID): The organization identifier.
-            limit (int): The maximum number of jobs to return.
-            job_type (str | None): An optional filter by job type.
+        This is a critical query for the worker service. It selects jobs that are
+        in the `QUEUED` state, ordering them by priority and then by creation
+        time to ensure that high-priority and older jobs are processed first.
 
         Returns:
-            Sequence[Job]: A list of `Job` instances in the queued state.
+            A sequence of `Job` instances ready for processing.
         """
         stmt = (
             select(Job)
@@ -330,34 +270,15 @@ class JobRepository:
             .order_by(desc(Job.priority), Job.created_at)
             .limit(limit)
         )
-
-        if job_type is not None:
+        if job_type:
             stmt = stmt.where(Job.type == job_type)
-
         return self.session.execute(stmt).scalars().all()
 
-    def get_jobs_by_status(
-        self,
-        org_id: uuid.UUID,
-        status: str,
-        limit: int = 100,
-    ) -> Sequence[Job]:
-        """
-        Retrieves jobs for an organization, filtered by status.
-
-        Args:
-            org_id (uuid.UUID): The organization identifier.
-            status (str): The status to filter by.
-            limit (int): The maximum number of jobs to return.
-
-        Returns:
-            Sequence[Job]: A list of `Job` instances with the specified
-                status.
-        """
-        status_enum = status if isinstance(status, JobStatus) else JobStatus(status)
+    def get_jobs_by_status(self, org_id: uuid.UUID, status: JobStatus, limit: int = 100) -> Sequence[Job]:
+        """Retrieves jobs for an organization, filtered by a specific status."""
         stmt = (
             select(Job)
-            .where(Job.org_id == org_id, Job.status == status_enum)
+            .where(Job.org_id == org_id, Job.status == status)
             .order_by(desc(Job.created_at))
             .limit(limit)
         )
@@ -365,33 +286,27 @@ class JobRepository:
 
     def get_job_statistics(self, org_id: uuid.UUID) -> dict[str, int]:
         """
-        Gets job count statistics by status for an organization.
+        Calculates and returns job count statistics, grouped by status.
 
-        Args:
-            org_id (uuid.UUID): The organization identifier.
+        This method performs an efficient database-level aggregation to count
+        the number of jobs in each status category for a given organization. This
+        is useful for building monitoring dashboards.
 
         Returns:
-            dict[str, int]: A dictionary mapping status values to job counts.
+            A dictionary mapping status names to their respective counts.
         """
-        stmt = (
-            select(Job.status, func.count(Job.id)).where(Job.org_id == org_id).group_by(Job.status)
-        )
+        stmt = select(Job.status, func.count(Job.id)).where(Job.org_id == org_id).group_by(Job.status)
         results = self.session.execute(stmt).all()
+        return {status.value: count for status, count in results}
 
-        return {
-            (status.value if isinstance(status, JobStatus) else status): count
-            for status, count in results
-        }
-
-    def increment_attempt(self, job_id: uuid.UUID) -> None:
+    def increment_attempt(self, job_id: uuid.UUID) -> Job:
         """
-        Increments the retry attempt counter for a job.
+        Atomically increments the retry attempt counter for a job.
 
-        Args:
-            job_id (uuid.UUID): The UUID of the job.
+        This is typically called by a worker just before re-queueing a failed job.
 
-        Raises:
-            ValueError: If the job with the specified `job_id` is not found.
+        Returns:
+            The updated `Job` instance.
         """
         job = self.get_job_by_id(job_id)
         if not job:
@@ -400,3 +315,4 @@ class JobRepository:
         job.attempt += 1
         job.updated_at = datetime.now(UTC)
         self.session.flush()
+        return job
