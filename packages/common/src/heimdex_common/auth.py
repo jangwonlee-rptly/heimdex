@@ -1,11 +1,29 @@
 """
-Authentication and Authorization Middleware.
+Authentication and Authorization Middleware for Heimdex Services.
 
-This module provides JWT-based authentication for Heimdex services,
-supporting both Supabase (RS256 with JWKS) and dev mode (HS256).
+This module provides robust JWT-based authentication, acting as a critical
+security layer for the entire platform. It is designed to be flexible,
+supporting multiple authentication providers while enforcing strict tenant
+isolation, which is a core security principle of the Heimdex architecture.
 
-The middleware extracts user identity and organization scope from JWT tokens
-and enforces tenant isolation across all API requests.
+Supported Authentication Modes:
+- **Supabase (Production)**: Uses RS256 asymmetric cryptography with a JSON Web
+  Key Set (JWKS) to verify tokens issued by Supabase. This is the recommended
+  mode for production environments, as it allows the API to verify tokens
+  without needing access to a shared secret.
+- **Development Mode**: Uses HS256 symmetric cryptography with a shared secret.
+  This mode is provided for local development and testing, simplifying the
+  process of generating valid tokens without a full-fledged authentication
+  provider.
+
+Core Responsibilities:
+- **Token Extraction**: Retrieves JWTs from the HTTP 'Authorization' header.
+- **Token Verification**: Validates the token's signature, expiration time (exp),
+  issuer (iss), and audience (aud) claims.
+- **Context Creation**: Extracts user identity ('sub' claim) and organization
+  scope ('org_id' custom claim) from the token.
+- **Tenant Isolation**: Ensures that every authenticated request is scoped to a
+  single organization, preventing data leakage between tenants.
 """
 
 from __future__ import annotations
@@ -21,22 +39,36 @@ from jwt import PyJWKClient
 
 from .config import get_config
 
-# HTTP Bearer token extractor
+# HTTP Bearer token extractor, a standard FastAPI utility for parsing
+# 'Authorization: Bearer <token>' headers.
 security = HTTPBearer()
 
-# JWKS client cache (lazy-loaded per config)
+# A global cache for the JWKS client. This is lazy-loaded to avoid
+# making external HTTP requests on module import and is reused across
+# requests for efficiency.
 _jwks_client: PyJWKClient | None = None
 
 
 @dataclass
 class RequestContext:
     """
-    Authenticated request context with user and organization identity.
+    Represents the authenticated context of an incoming request.
+
+    This data class is populated by the `verify_jwt` dependency and provides
+    downstream route handlers with strongly-typed access to the authenticated
+    user's identity and organizational scope. It is the primary mechanism for
+    enforcing tenant isolation at the application layer.
 
     Attributes:
-        user_id: Unique identifier for the authenticated user (from JWT sub claim)
-        org_id: Organization ID for tenant isolation (from custom claim)
-        role: User role if present (e.g., "admin", "user")
+        user_id (str): The unique identifier for the authenticated user, extracted
+            from the standard 'sub' (subject) claim of the JWT.
+        org_id (str): The identifier for the organization the user is acting
+            within. This value is critical for ensuring that all data access is
+            scoped to the correct tenant. It is extracted from a custom claim
+    .
+        role (str | None): An optional user role, such as 'admin' or 'member',
+            which can be used for more granular authorization checks.
+            Extracted from the 'role' claim if present.
     """
 
     user_id: str
@@ -46,13 +78,19 @@ class RequestContext:
 
 def _get_jwks_client() -> PyJWKClient:
     """
-    Get or create the JWKS client for Supabase token verification.
+    Retrieves or initializes the JWKS client for Supabase token verification.
+
+    This function implements a lazy-loading pattern for the PyJWKClient. The client
+    is responsible for fetching the JSON Web Key Set from Supabase's configured
+    URL, which contains the public keys required to verify RS256 JWT signatures.
+    The client is cached globally to prevent re-fetching the JWKS on every request.
 
     Returns:
-        PyJWKClient: Cached JWKS client instance
+        PyJWKClient: A cached instance of the JWKS client.
 
     Raises:
-        ValueError: If SUPABASE_JWKS_URL is not configured
+        ValueError: If the application is configured for Supabase authentication
+            but the `SUPABASE_JWKS_URL` environment variable is not set.
     """
     global _jwks_client
     if _jwks_client is None:
@@ -65,16 +103,22 @@ def _get_jwks_client() -> PyJWKClient:
 
 def _verify_dev_jwt(token: str) -> dict[str, Any]:
     """
-    Verify JWT token in dev mode using HS256.
+    Verifies a JWT in development mode using a symmetric HS256 key.
+
+    This verification method is used when the 'AUTH_PROVIDER' is set to 'dev'.
+    It uses a shared secret (`DEV_JWT_SECRET`) to decode the token. This is
+    simpler for local testing but is not suitable for production.
 
     Args:
-        token: JWT token string
+        token (str): The JWT token string extracted from the request header.
 
     Returns:
-        dict: Decoded JWT payload
+        dict[str, Any]: The decoded JWT payload as a dictionary.
 
     Raises:
-        HTTPException: If token is invalid or expired
+        HTTPException (401 Unauthorized): If the token has expired or if its
+            signature is invalid, indicating it was tampered with or signed
+            with the wrong key.
     """
     config = get_config()
 
@@ -100,16 +144,23 @@ def _verify_dev_jwt(token: str) -> dict[str, Any]:
 
 def _verify_supabase_jwt(token: str) -> dict[str, Any]:
     """
-    Verify JWT token from Supabase using RS256 and JWKS.
+    Verifies a JWT from Supabase using an asymmetric RS256 key from JWKS.
+
+    This is the production-grade verification method. It involves several steps:
+    1. Fetching the public signing key from the Supabase JWKS endpoint.
+    2. Verifying the token's signature against the fetched public key.
+    3. Validating standard claims: 'exp' (expiration), 'aud' (audience), and
+       'iss' (issuer) to ensure the token is intended for this application.
 
     Args:
-        token: JWT token string
+        token (str): The JWT token string from the request.
 
     Returns:
-        dict: Decoded JWT payload
+        dict[str, Any]: The decoded JWT payload.
 
     Raises:
-        HTTPException: If token is invalid, expired, or has wrong aud/iss claims
+        HTTPException (401 Unauthorized): If the token is invalid for any reason,
+            including signature mismatch, expiration, or incorrect audience/issuer.
     """
     config = get_config()
 
@@ -150,21 +201,29 @@ def _verify_supabase_jwt(token: str) -> dict[str, Any]:
 
 def _extract_org_id(payload: dict[str, Any]) -> str:
     """
-    Extract organization ID from JWT payload.
+    Extracts the organization ID from the JWT payload.
 
-    Checks multiple possible claim locations:
-    1. app_metadata.org_id (Supabase custom claim)
-    2. https://heimdex.io/org_id (custom namespace claim)
-    3. org_id (direct claim)
+    The organization ID is fundamental for enforcing tenant isolation. This
+    function searches for the 'org_id' in a prioritized list of possible
+    locations within the JWT claims, ensuring compatibility with different
+    token structures.
+
+    Search Priority:
+    1. `app_metadata.org_id`: A common pattern for custom claims in Supabase.
+    2. `https://heimdex.io/org_id`: A namespaced claim, following best practices
+       to avoid collisions.
+    3. `org_id`: A direct, top-level claim.
 
     Args:
-        payload: Decoded JWT payload
+        payload (dict[str, Any]): The decoded JWT payload.
 
     Returns:
-        str: Organization ID
+        str: The extracted organization ID.
 
     Raises:
-        HTTPException: If org_id claim is missing
+        HTTPException (401 Unauthorized): If the 'org_id' claim cannot be
+            found in any of the expected locations, as this is a critical
+            requirement for secure data access.
     """
     # Try app_metadata.org_id first (Supabase pattern)
     if "app_metadata" in payload and "org_id" in payload["app_metadata"]:
@@ -188,22 +247,37 @@ def verify_jwt(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> RequestContext:
     """
-    FastAPI dependency that verifies JWT and extracts request context.
+    A FastAPI dependency that secures routes by verifying the JWT.
 
-    This is the main entrypoint for auth middleware. It:
-    1. Extracts Bearer token from Authorization header
-    2. Verifies signature and claims (dev or Supabase mode)
-    3. Extracts user_id, org_id, and role
-    4. Returns RequestContext for use in route handlers
+    This function serves as the primary authentication middleware for API
+    endpoints. By adding it as a dependency to a route, you ensure that the
+    request is authenticated and authorized before the route's logic is
+    executed.
+
+    Workflow:
+    1. The `HTTPBearer` dependency extracts the token from the 'Authorization'
+       header.
+    2. The token is passed to the appropriate verification function based on the
+       configured `AUTH_PROVIDER`.
+    3. The user ID ('sub') and organization ID ('org_id') are extracted from
+       the verified payload.
+    4. A `RequestContext` object is instantiated and returned.
+
+    This returned context can then be injected directly into the route handler's
+    parameters, providing a clean and secure way to access user and tenant info.
 
     Args:
-        credentials: HTTP Authorization credentials from request
+        credentials (HTTPAuthorizationCredentials): The credentials object
+            provided by the `HTTPBearer` security dependency.
 
     Returns:
-        RequestContext: Authenticated request context with user/org identity
+        RequestContext: An object containing the authenticated user_id, org_id,
+            and optional role, ready for use in the application logic.
 
     Raises:
-        HTTPException: If token is missing, invalid, or missing required claims
+        HTTPException (401 Unauthorized): If the token is missing, malformed,
+            invalid, or does not contain the necessary claims for authentication
+            and tenant scoping.
     """
     config = get_config()
     token = credentials.credentials
@@ -238,19 +312,26 @@ def create_dev_token(
     exp_minutes: int = 60,
 ) -> str:
     """
-    Create a dev mode JWT token for testing.
+    Creates a JWT for testing and development purposes.
+
+    This utility function is essential for local development, enabling the
+    creation of valid tokens without needing an external identity provider.
+    It signs the token with the `DEV_JWT_SECRET`.
 
     Args:
-        user_id: User identifier
-        org_id: Organization identifier
-        role: Optional user role
-        exp_minutes: Token expiration in minutes (default: 60)
+        user_id (str): The user identifier to be placed in the 'sub' claim.
+        org_id (str): The organization identifier for tenant scoping.
+        role (str | None): An optional role to include in the token.
+        exp_minutes (int): The token's lifetime in minutes from the current time.
+                           Defaults to 60 minutes.
 
     Returns:
-        str: Signed JWT token
+        str: A signed HS256 JWT token as a string.
 
-    Note:
-        This function should only be used in dev/test environments.
+    Warning:
+        This function and the associated 'dev' authentication provider must
+        never be used in a production environment due to their reliance on a
+        shared secret.
     """
     config = get_config()
 

@@ -1,13 +1,23 @@
 """
-Entrypoint for the Heimdex Worker Heartbeat Process.
+Entrypoint for the Heimdex Worker's Lightweight Heartbeat Process.
 
-This module provides a simple heartbeat process for the worker service. It
-emits a periodic log message to indicate that the worker is alive and running.
-This is useful for monitoring and ensuring that the worker container is healthy.
+This module provides a simple, standalone process whose sole responsibility is
+to signal that the worker *service* is alive. It does this by emitting a
+periodic "heartbeat" log message.
 
-The main process is designed to be lightweight and does not handle any actual
-job processing. Job processing is handled by the Dramatiq actors in `tasks.py`,
-which are run in a separate process by the Dramatiq CLI.
+Architectural Note:
+This process does **not** perform any actual job processing. In the Heimdex
+architecture, job processing is handled by Dramatiq, which runs its own set of
+worker processes, typically started via the `dramatiq` command-line tool.
+
+The purpose of this heartbeat process is to serve as a stable, lightweight
+entrypoint (`CMD`) for the worker's Docker container. It provides a clear
+signal for container orchestration systems (like Kubernetes) that the container
+is running, without the overhead of the full job processing environment. This
+separation makes the system more robust and easier to monitor.
+
+The process is designed to be resilient, with graceful shutdown handling for
+`SIGTERM` and `SIGINT` signals.
 """
 
 from __future__ import annotations
@@ -19,80 +29,81 @@ from threading import Event
 
 from .logger import log_event
 
+# The interval in seconds at which the heartbeat log is emitted.
 _HEARTBEAT_INTERVAL = int(os.getenv("HEIMDEX_HEARTBEAT_INTERVAL", "20"))
+# A threading.Event is used to signal the main loop to exit gracefully.
+# This is a thread-safe way to manage shutdown requests from signal handlers.
 _shutdown_event = Event()
 
 
-def _handle_stop(signum: int, frame: object) -> None:  # pragma: no cover - signal handler
+def _handle_stop(signum: int, frame: object) -> None:  # pragma: no cover
     """
-    Handles termination signals gracefully.
+    A signal handler for graceful shutdown of the heartbeat process.
 
-    This function is registered as a signal handler for `SIGTERM` and `SIGINT`.
-    When a termination signal is received, it logs a 'stopping' message and
-    sets a `threading.Event` to signal the main heartbeat loop to exit
-    cleanly.
+    This function is registered to handle `SIGTERM` (sent by Docker/Kubernetes
+    to request a shutdown) and `SIGINT` (sent on Ctrl+C). When a signal is
+    received, it logs a "stopping" message and sets the global `_shutdown_event`,
+    which causes the main `_heartbeat_loop` to terminate cleanly.
 
     Args:
-        signum (int): The signal number that was received.
-        frame (object): The current stack frame. This argument is required by
-            the `signal` module but is not used in this function.
+        signum: The number of the signal that was received.
+        frame: The current stack frame (required by the signal handler signature).
     """
-    log_event("INFO", "stopping", signal=signum)
+
+    log_event("INFO", "stopping", signal_received=signum)
     _shutdown_event.set()
 
 
 def _register_signal_handlers() -> None:
-    """
-    Registers signal handlers for graceful shutdown.
-
-    This function sets up handlers for `SIGTERM` and `SIGINT` to ensure that
-    the worker process can be terminated gracefully.
-    """
+    """Registers the `_handle_stop` function as the handler for SIGTERM and SIGINT."""
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
 
 
 def _heartbeat_loop() -> None:
     """
-    Runs the main heartbeat loop.
+    The main loop that emits a periodic heartbeat log message.
 
-    This loop emits a periodic 'heartbeat' log message at a configured
-    interval (`HEIMDEX_HEARTBEAT_INTERVAL`). It continues to run until the
-    shutdown event is set by the signal handler. The use of `_shutdown_event.wait`
-    ensures that the loop exits promptly when a shutdown is requested.
+    This loop will continue indefinitely until the `_shutdown_event` is set.
+    It uses `_shutdown_event.wait()` with a timeout, which is an efficient way
+    to sleep for the desired interval while still being immediately responsive
+    to a shutdown signal.
     """
     while not _shutdown_event.is_set():
         log_event("INFO", "heartbeat", interval_seconds=_HEARTBEAT_INTERVAL)
+        # Wait for the interval duration. If the shutdown event is set during
+        # this time, the wait will be interrupted, and the loop will exit.
         if _shutdown_event.wait(timeout=_HEARTBEAT_INTERVAL):
             break
 
 
 def main() -> int:
     """
-    Runs the worker's main entrypoint.
+    The main entrypoint for the worker's heartbeat process.
 
-    This function serves as the main entrypoint for the worker's heartbeat
-    process. It performs the following steps:
-    1.  Logs a startup message with redacted configuration.
-    2.  Registers signal handlers for graceful shutdown.
-    3.  Starts the main heartbeat loop.
-    4.  Logs a final 'stopped' message upon exiting the loop.
+    This function orchestrates the lifecycle of the process:
+    1.  Logs a detailed startup message, including a configuration summary.
+    2.  Registers the signal handlers for graceful termination.
+    3.  Enters the main heartbeat loop.
+    4.  Logs a final "stopped" message when the loop terminates.
 
     Returns:
-        int: An exit code of 0 to indicate successful execution.
+        An exit code of 0, indicating a clean and successful shutdown.
     """
     from heimdex_common.config import get_config
 
     config = get_config()
     log_event(
         "INFO",
-        "starting",
-        interval_seconds=_HEARTBEAT_INTERVAL,
-        config=config.log_summary(redact_secrets=True),
+        "starting_heartbeat",
+        details={
+            "interval_seconds": _HEARTBEART_INTERVAL,
+            "config_summary": config.log_summary(redact_secrets=True),
+        },
     )
     _register_signal_handlers()
     _heartbeat_loop()
-    log_event("INFO", "stopped")
+    log_event("INFO", "stopped_heartbeat")
     return 0
 
 

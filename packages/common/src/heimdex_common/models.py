@@ -1,12 +1,19 @@
 """
-SQLAlchemy Models for Heimdex Database Schema.
+SQLAlchemy Models Defining the Heimdex Database Schema.
 
-This module defines the SQLAlchemy ORM models that represent the database
-schema for the Heimdex application. It includes models for jobs, job events,
-and other core entities.
+This module serves as the canonical, code-first definition of the Heimdex
+database schema using the SQLAlchemy Object-Relational Mapper (ORM). By defining
+the schema in Python, we gain type safety, maintainability, and a single source
+of truth that is decoupled from any specific database vendor.
 
-The `Base` class is the declarative base for all models, and the `metadata_obj`
-is used to define a consistent naming convention for database constraints.
+The models herein represent the core entities of the application, such as Jobs
+and their associated Events. Each class maps to a database table, and its
+attributes map to the columns of that table.
+
+A key feature of this module is the consistent naming convention for database
+constraints (indexes, keys, etc.), which is configured in the `metadata_obj`.
+This ensures that the generated database schema is predictable and easy for
+developers and DBAs to understand.
 """
 
 from __future__ import annotations
@@ -30,25 +37,28 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# A custom MetaData instance with a standardized naming convention.
+# This is a best practice that prevents auto-generated constraint names
+# from being long and unpredictable (e.g., "uq_job_org_id_idempotency_key_1").
+# Instead, they will follow a clear, consistent pattern.
 metadata_obj = MetaData(
     naming_convention={
-        "ix": "idx_%(table_name)s__%(column_0_label)s",
-        "uq": "uq_%(table_name)s__%(column_0_name)s",
-        "ck": "ck_%(table_name)s__%(constraint_name)s",
-        "fk": "fk_%(table_name)s__%(referred_table_name)s",
-        "pk": "pk_%(table_name)s",
+        "ix": "idx_%(table_name)s__%(column_0_label)s",  # Index
+        "uq": "uq_%(table_name)s__%(column_0_name)s",  # Unique Constraint
+        "ck": "ck_%(table_name)s__%(constraint_name)s",  # Check Constraint
+        "fk": "fk_%(table_name)s__%(referred_table_name)s",  # Foreign Key
+        "pk": "pk_%(table_name)s",  # Primary Key
     }
 )
 
 
 class Base(DeclarativeBase):
     """
-    Base class for all SQLAlchemy models in the application.
+    A common declarative base for all SQLAlchemy models in the application.
 
-    This class provides a common base for all ORM models, and it is configured
-    with a `MetaData` object that defines a consistent naming convention for
-    database constraints. This helps to ensure that index, unique constraint,
-    and foreign key names are generated in a predictable and standardized way.
+    Using a shared `Base` class allows for the centralized application of
+    configurations, such as the `MetaData` object with its naming convention.
+    All ORM models in the application should inherit from this class.
     """
 
     metadata = metadata_obj
@@ -56,24 +66,17 @@ class Base(DeclarativeBase):
 
 class JobStatus(str, Enum):
     """
-    Enumeration of allowed job status values.
+    A type-safe enumeration of the allowed states in a job's lifecycle.
 
-    This enum defines the possible states in the job lifecycle, ensuring that
-    the `status` field in the `Job` model is always one of these well-defined
-    values.
+    Using a Python `Enum` and linking it to a database ENUM type via `SAEnum`
+    provides multiple benefits:
+    1.  **Application-Level Safety**: Prevents bugs from typos in status strings.
+    2.  **Database-Level Integrity**: The database itself will reject any attempt
+        to set an invalid status.
+    3.  **Self-Documentation**: The code clearly defines all possible states.
 
-    Attributes:
-        QUEUED (str): The initial state of a job when it is first created.
-        RUNNING (str): The state of a job while it is being processed by a
-            worker.
-        SUCCEEDED (str): The terminal state of a job that has completed
-            successfully.
-        FAILED (str): The terminal state of a job that has failed and may be
-            retried.
-        CANCELED (str): The terminal state of a job that has been manually
-            canceled.
-        DEAD_LETTER (str): The terminal state of a job that has failed all of
-            its retry attempts.
+    The lifecycle transitions are typically:
+    `QUEUED` -> `RUNNING` -> (`SUCCEEDED` | `FAILED` -> `QUEUED` (retry)) -> `DEAD_LETTER`
     """
 
     QUEUED = "queued"
@@ -86,202 +89,96 @@ class JobStatus(str, Enum):
 
 class BackoffPolicy(str, Enum):
     """
-    Enumeration of backoff policies for retry scheduling.
-
-    This enum defines the strategies that can be used to schedule retries for
-    failed jobs.
-
-    Attributes:
-        NONE (str): No backoff policy; the job will not be retried.
-        FIXED (str): A fixed backoff policy, where the delay between retries
-            is constant.
-        EXPONENTIAL (str): An exponential backoff policy, where the delay
-            between retries increases exponentially.
+    Enumeration of retry scheduling strategies for failed jobs.
     """
 
-    NONE = "none"
-    FIXED = "fixed"
-    EXPONENTIAL = "exp"
+    NONE = "none"  # The job will not be retried.
+    FIXED = "fixed"  # The delay between retries is constant.
+    EXPONENTIAL = "exp"  # The delay increases exponentially with each retry.
 
 
 class Job(Base):
     """
-    Represents the durable ledger for all asynchronous jobs.
+    Represents the durable state and control record for an asynchronous job.
 
-    This SQLAlchemy model maps to the `job` table in the database. It stores
-    the operational state of jobs and serves as the primary source of truth for
-    job status queries. The model includes support for org-scoped multi-tenancy,
-    idempotent job creation, and configurable retry logic.
-
-    The job lifecycle follows a state machine:
-    `queued` → `running` → (`succeeded` | `failed` | `canceled` | `dead_letter`)
+    This model is the central ledger for all background processing tasks. It is
+    designed for high-concurrency environments and includes features critical for
+    a robust job queueing system, such as multi-tenancy, idempotency, and
+    configurable retry logic. It is the source of truth for a job's status.
 
     Attributes:
-        id (uuid.UUID): The globally unique identifier for the job.
-        org_id (uuid.UUID): The organization/tenant identifier for RLS.
-        type (str): The job type discriminator (e.g., 'mock_process').
-        status (JobStatus): The current state of the job.
-        attempt (int): The retry attempt counter.
-        max_attempts (int): The maximum number of retry attempts.
-        backoff_policy (BackoffPolicy): The backoff policy for retries.
-        priority (int): The job priority (higher is more urgent).
-        idempotency_key (str | None): A client-provided key for deduplication.
-        requested_by (str | None): The user or service that requested the job.
-        created_at (datetime): The timestamp when the job was created.
-        updated_at (datetime): The timestamp when the job was last modified.
-        started_at (datetime | None): The timestamp when job execution started.
-        finished_at (datetime | None): The timestamp when the job reached a
-            terminal state.
-        last_error_code (str | None): An error classification code.
-        last_error_message (str | None): A human-readable error message.
-        events (list[JobEvent]): A relationship to the job's events.
+        id: The primary key, a globally unique identifier for the job.
+        org_id: The tenant identifier, crucial for data isolation and RLS.
+        type: A string discriminator for routing the job to the correct handler.
+        status: The current state in the job lifecycle (`JobStatus`).
+        attempt: The current retry count (0 for the first attempt).
+        max_attempts: The number of retries before moving the job to dead-letter.
+        backoff_policy: The strategy for calculating retry delays.
+        idempotency_key: A client-provided key to prevent duplicate job creation.
+        created_at: The timestamp of job creation.
+        updated_at: The timestamp of the last modification to the job record.
+        events: A one-to-many relationship to the job's historical events.
     """
 
     __tablename__ = "job"
 
-    # Primary key
+    # Core Identifiers
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-        comment="Globally unique job identifier",
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    # Tenant & type
-    org_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=False,
-        index=True,
-        comment="Organization/tenant identifier for RLS",
-    )
-    type: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        comment="Job type discriminator (e.g., 'mock_process', 'drive_ingest')",
-    )
-
-    # State & control
+    # State Machine and Retry Control
     status: Mapped[JobStatus] = mapped_column(
-        SAEnum(
-            JobStatus,
-            name="job_status",
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-        ),
-        nullable=False,
-        default=JobStatus.QUEUED,
-        server_default=text("'queued'"),
-        comment="Current job state",
+        SAEnum(JobStatus, name="job_status", values_callable=lambda e: [i.value for i in e]),
+        nullable=False, default=JobStatus.QUEUED, server_default=text("'queued'")
     )
-    attempt: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default=text("0"),
-        comment="Retry attempt counter (0 = first attempt)",
-    )
-    max_attempts: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=5,
-        server_default=text("5"),
-        comment="Maximum retry attempts before dead-lettering",
-    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default=text("5"))
     backoff_policy: Mapped[BackoffPolicy] = mapped_column(
-        SAEnum(
-            BackoffPolicy,
-            name="job_backoff_policy",
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-        ),
-        nullable=False,
-        default=BackoffPolicy.EXPONENTIAL,
-        server_default=text("'exp'"),
-        comment="Backoff policy for retry scheduling",
+        SAEnum(BackoffPolicy, name="job_backoff_policy", values_callable=lambda e: [i.value for i in e]),
+        nullable=False, default=BackoffPolicy.EXPONENTIAL, server_default=text("'exp'")
     )
-    priority: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default=text("0"),
-        comment="Job priority (higher = more urgent, future use)",
-    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
-    # Idempotency & attribution
-    idempotency_key: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        comment="Client-provided key for deduplication",
-    )
-    requested_by: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        comment="User/service that requested the job",
-    )
+    # Idempotency and Attribution
+    idempotency_key: Mapped[str | None] = mapped_column(String(255))
+    requested_by: Mapped[str | None] = mapped_column(String(255))
 
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-        comment="Job creation timestamp",
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-        onupdate=datetime.utcnow,
-        comment="Last modification timestamp",
-    )
-    started_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=True,
-        comment="When job execution started",
-    )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=True,
-        comment="When job reached terminal state",
-    )
+    # Timestamps for Auditing and Analytics
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"), onupdate=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
-    # Error tracking
-    last_error_code: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-        comment="Error classification (e.g., 'TIMEOUT', 'VALIDATION_ERROR')",
-    )
-    last_error_message: Mapped[str | None] = mapped_column(
-        String(2048),
-        nullable=True,
-        comment="Human-readable error detail",
-    )
+    # Error Tracking
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    last_error_message: Mapped[str | None] = mapped_column(String(2048))
 
     # Relationships
     events: Mapped[list[JobEvent]] = relationship(
-        "JobEvent",
-        back_populates="job",
-        cascade="all, delete-orphan",
-        order_by="JobEvent.ts.desc()",
+        "JobEvent", back_populates="job", cascade="all, delete-orphan", order_by="JobEvent.ts.desc()"
     )
 
-    # Table-level constraints and indexes
     __table_args__ = (
-        # Idempotency constraint (org_id + idempotency_key unique when key is not null)
-        # Using Index with unique=True for partial unique constraint support
-        Index(
-            "idx_job__org_id_idempotency_key",
-            "org_id",
-            "idempotency_key",
-            unique=True,
-            postgresql_where=text("idempotency_key IS NOT NULL"),
-        ),
-        # Composite index for org-scoped chronological queries
+        # Partial unique index for idempotency. This is a key optimization. It
+        # enforces that for a given organization, the idempotency_key must be
+        # unique, but only when it's not NULL. This allows clients to retry
+        # job creation safely without creating duplicate jobs.
+        Index("idx_job__org_id_idempotency_key", "org_id", "idempotency_key", unique=True, postgresql_where=text("idempotency_key IS NOT NULL")),
+        # A composite index to optimize the most common query pattern: fetching
+        # the most recent jobs for a specific organization.
         Index("idx_job__org_id_created_at_desc", "org_id", desc("created_at")),
-        # Index for status monitoring
+        # An index to efficiently query for jobs in a particular state, which is
+        # essential for workers picking up new jobs or for monitoring failures.
         Index("idx_job__status_created_at", "status", "created_at"),
-        # Ensure finished_at is populated for terminal states only
+        # A database-level check constraint to enforce application logic. This
+        # ensures data integrity by requiring `finished_at` to be set if and
+        # only if the job is in a terminal state.
         CheckConstraint(
-            "((status IN ('succeeded', 'failed', 'canceled', 'dead_letter') "
-            "AND finished_at IS NOT NULL) OR "
-            "(status IN ('queued', 'running') AND finished_at IS NULL))",
+            "((status IN ('succeeded', 'failed', 'canceled', 'dead_letter')) AND finished_at IS NOT NULL) OR "
+            "((status IN ('queued', 'running')) AND finished_at IS NULL)",
             name="status_finished_at_consistency",
         ),
         {"comment": "Durable ledger for asynchronous jobs with retry and idempotency support"},
@@ -293,80 +190,55 @@ class Job(Base):
 
 class JobEvent(Base):
     """
-    Represents an immutable audit log of all job state transitions.
+    Represents an immutable, append-only audit log of a job's lifecycle.
 
-    This SQLAlchemy model maps to the `job_event` table. It provides a
-    complete timeline of a job's state changes, which is invaluable for
-    debugging, compliance, and analytics. Events are designed to be
-    append-only and should never be modified.
+    This model provides a complete, chronological history of every state
+    transition and significant event that occurs during a job's execution. It is
+    invaluable for debugging, auditing, and observability, as it allows developers
+    to reconstruct the exact sequence of events for any given job.
 
     Attributes:
-        id (uuid.UUID): The unique identifier for the event.
-        job_id (uuid.UUID): A foreign key to the parent job.
-        ts (datetime): The timestamp of when the event occurred.
-        prev_status (str | None): The status of the job before the
-            transition. This is `None` for the initial event.
-        next_status (str): The status of the job after the transition.
-        detail_json (dict | None): A JSONB field for storing additional
-            event metadata, such as stage, progress, or error details.
-        job (Job): A relationship to the parent `Job` object.
+        id: The primary key for the event.
+        job_id: A foreign key linking this event to its parent `Job`.
+        ts: The precise timestamp when the event occurred.
+        prev_status: The state of the job before this event.
+        next_status: The state of the job after this event.
+        detail_json: A flexible JSONB field for storing rich, structured context.
+        job: The back-referencing relationship to the parent `Job`.
     """
 
     __tablename__ = "job_event"
 
-    # Primary key
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-        comment="Unique event identifier",
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-
-    # Foreign key to job
+    # The `ondelete="CASCADE"` ensures that if a Job is deleted, all of its
+    # associated events are automatically deleted by the database, preventing
+    # orphaned records.
     job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("job.id", ondelete="CASCADE"),
-        nullable=False,
-        comment="Reference to parent job",
+        UUID(as_uuid=True), ForeignKey("job.id", ondelete="CASCADE"), nullable=False
     )
-
-    # Event data
     ts: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-        comment="Event occurrence timestamp",
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
-    prev_status: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-        comment="Status before transition (NULL for initial state)",
-    )
-    next_status: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        comment="Status after transition",
-    )
-    detail_json: Mapped[dict | None] = mapped_column(
-        JSONB,
-        nullable=True,
-        comment="Additional event metadata (stage, progress, error details)",
-    )
+    prev_status: Mapped[str | None] = mapped_column(String(50))
+    next_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    # JSONB is used here because it's a binary, indexed format in PostgreSQL,
+    # making it more efficient for storage and querying than plain JSON or text.
+    detail_json: Mapped[dict | None] = mapped_column(JSONB)
 
-    # Relationships
     job: Mapped[Job] = relationship("Job", back_populates="events")
 
-    # Table-level constraints and indexes
     __table_args__ = (
-        # Index for job timeline queries (hot path)
+        # A composite index to optimize for the most common query: fetching all
+        # events for a specific job, ordered by time.
         Index("idx_job_event__job_id_ts", "job_id", "ts"),
-        # Index for chronological queries
+        # A general-purpose index on the timestamp for chronological queries
+        # across all jobs, which can be useful for system-wide monitoring.
         Index("idx_job_event__ts", "ts"),
-        {
-            "comment": "Immutable audit log of job state transitions",
-        },
+        {"comment": "Immutable audit log of job state transitions"},
     )
 
     def __repr__(self) -> str:
         status_flow = f"{self.prev_status} -> {self.next_status}"
-        return f"<JobEvent(id={self.id}, job_id={self.job_id}, status={status_flow})>"
+        return f"<JobEvent(id={self.id}, job_id={self.job_id}, status='{status_flow}')>"

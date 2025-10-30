@@ -1,14 +1,21 @@
 """
-Dramatiq Tasks for Background Job Processing.
+Dramatiq Actors for Asynchronous Background Job Processing.
 
-This module defines the Dramatiq actors that perform the actual work of
-processing asynchronous jobs. Actors are functions decorated with `@dramatiq.actor`
-which are discovered and run by the Dramatiq worker process.
+This module is the core of the worker service. It defines the "actors," which are
+the functions that perform the actual background processing. These functions are
+decorated with `@dramatiq.actor`, which registers them with the Dramatiq broker
+so they can be called by messages from the queue.
 
-These tasks are responsible for:
--   Receiving job information from the message queue.
--   Executing the job's business logic (e.g., video processing, analysis).
--   Updating the job's status in the database via the `JobRepository`.
+Architectural Role:
+- **Consumer**: This module acts as the "consumer" in the producer-consumer
+  pattern. The API service produces messages, and the actors in this module
+  consume them.
+- **Business Logic**: The primary business logic of a background task (e.g.,
+  video transcoding, data analysis) resides within these actor functions.
+- **State Management**: A crucial responsibility of each actor is to report the
+  progress and final status of a job back to the central database using the
+  `JobRepository`. This ensures that the job's state is always visible to the
+  rest of the system via the API.
 """
 
 from __future__ import annotations
@@ -22,68 +29,51 @@ import dramatiq
 from dramatiq.brokers.redis import RedisBroker
 
 from heimdex_common.db import get_db
+from heimdex_common.models import JobStatus
 from heimdex_common.repositories import JobRepository
 
 from .logger import log_event
 
-# Configure Dramatiq broker
+# --- Dramatiq Broker and Actor Configuration ---
 redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
 broker = RedisBroker(url=redis_url)
 dramatiq.set_broker(broker)
 
-# Stage durations (seconds)
-STAGE_DURATIONS = {
-    "extracting": 2,
-    "analyzing": 3,
-    "indexing": 1,
-}
+# --- Mock Processing Configuration ---
+STAGE_DURATIONS = {"extracting": 2, "analyzing": 3, "indexing": 1}
 
 
 def _update_job_status(
     job_id: str,
-    status: str | None = None,
+    status: JobStatus | None = None,
     stage: str | None = None,
     progress: int | None = None,
     result: dict | None = None,
     error: str | None = None,
 ) -> None:
     """
-    Updates a job's status and logs a corresponding event.
+    A centralized helper function for updating a job's status in the database.
 
-    This helper function provides a consistent way for worker tasks to update
-    the status of a job in the database. It uses the `JobRepository` to
-    abstract the underlying database operations.
-
-    The function also handles the mapping of legacy status values to the new
-    `JobStatus` enum to maintain backward compatibility.
+    This function provides a consistent, transactional way for actors to report
+    their progress. It encapsulates the interaction with the `JobRepository`,
+    ensuring that every status update is a clean, atomic operation.
 
     Args:
-        job_id (str): The ID of the job to update.
-        status (str | None): The new status of the job. Legacy values like
-            "pending", "processing", "completed", and "failed" are supported
-            and will be mapped to their new equivalents.
-        stage (str | None): The new processing stage to record in the job event.
-        progress (int | None): The new progress percentage (0-100) to record.
-        result (dict | None): A dictionary containing the job's result data.
-        error (str | None): An error message to record if the job failed.
+        job_id: The UUID of the job to update.
+        status: The new `JobStatus` of the job.
+        stage: The current processing stage to be recorded in a `JobEvent`.
+        progress: The current progress percentage (0-100).
+        result: The final result of the job, to be stored in a `JobEvent`.
+        error: An error message to be stored if the job failed.
     """
-    # Map old status values to new status values
-    status_mapping = {
-        "pending": "queued",
-        "processing": "running",
-        "completed": "succeeded",
-        "failed": "failed",
-    }
-
-    # Convert status if provided
-    if status is not None:
-        status = status_mapping.get(status, status)
-
     with get_db() as session:
         repo = JobRepository(session)
+        # The `update_job_with_stage_progress` method is a convenient way to
+        # update the job's primary status while also logging rich, structured
+        # details about the current stage and progress.
         repo.update_job_with_stage_progress(
             job_id=uuid.UUID(job_id),
-            status=status,
+            status=status.value if status else None,
             stage=stage,
             progress=progress,
             result=result,
@@ -91,76 +81,81 @@ def _update_job_status(
         )
 
 
-@dramatiq.actor(max_retries=3, min_backoff=1000, max_backoff=60000)
+@dramatiq.actor(
+    # The actor's name must match the `actor_name` used in the API service
+    # when the message was created.
+    actor_name="process_mock",
+    # Configure Dramatiq's automatic retry mechanism. If this actor raises an
+    # exception, Dramatiq will re-enqueue it up to 3 times.
+    max_retries=3,
+    # Use an exponential backoff strategy for retries, starting with a 1-second
+    # delay and capped at a 60-second delay. This prevents a failing job from
+    # overwhelming the system with rapid retries.
+    min_backoff=1000,
+    max_backoff=60000,
+)
 def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
     """
-    Processes a mock job with multiple simulated stages.
+    A Dramatiq actor that simulates a multi-stage background job.
 
-    This Dramatiq actor serves as a placeholder for a real video processing
-    pipeline. It simulates a multi-stage process, including "extracting",
-    "analyzing", and "indexing", with configurable delays for each stage.
-
-    The actor is designed to handle deterministic failures for testing the
-    retry and error handling mechanisms of the worker. If `fail_at_stage` is
-    provided, the actor will raise an exception when it reaches that stage.
+    This function serves as a template and a testing tool for the background
+    processing system. It demonstrates the key responsibilities of an actor:
+    1.  Marking the job as `RUNNING` when it starts.
+    2.  Periodically updating the job's progress and current stage.
+    3.  Handling potential failures and allowing Dramatiq's retry logic to take over.
+    4.  Marking the job as `SUCCEEDED` upon successful completion and storing the result.
+    5.  Marking the job as `FAILED` if a non-transient error occurs.
 
     Args:
-        job_id (str): The UUID of the job to process. This is used to
-            update the job's status in the database.
-        fail_at_stage (str | None): An optional stage name at which to
-            trigger a deterministic failure. This is used for testing the
-            retry mechanism.
+        job_id: The UUID of the job to process, passed from the enqueued message.
+        fail_at_stage: An optional parameter to force a failure at a specific
+                       stage, used for testing the resilience of the system.
 
     Raises:
-        Exception: If a deterministic failure is triggered at the specified
-            `fail_at_stage`. Dramatiq will catch this exception and handle
-            the retry logic.
+        Exception: If a deterministic failure is triggered, this exception will
+                   be caught by Dramatiq, which will then schedule a retry
+                   according to the actor's configuration.
     """
-    log_event("INFO", "job_started", job_id=job_id, fail_at_stage=fail_at_stage)
+    log_event("INFO", "job_processing_started", job_id=job_id, fail_at_stage=fail_at_stage)
 
     try:
-        # Mark job as processing
-        _update_job_status(job_id, status="processing", progress=0)
+        _update_job_status(job_id, status=JobStatus.RUNNING, progress=0, stage="starting")
 
-        stages = ["extracting", "analyzing", "indexing"]
+        stages = list(STAGE_DURATIONS.keys())
         total_duration = sum(STAGE_DURATIONS.values())
-        elapsed = 0
+        elapsed_time = 0
 
-        for _, stage in enumerate(stages):
+        for stage in stages:
             log_event("INFO", "stage_started", job_id=job_id, stage=stage)
-
-            # Update stage
-            progress = int((elapsed / total_duration) * 100)
+            progress = int((elapsed_time / total_duration) * 100)
             _update_job_status(job_id, stage=stage, progress=progress)
 
-            # Check for deterministic failure
             if stage == fail_at_stage:
                 error_msg = f"Deterministic failure at stage: {stage}"
-                log_event("ERROR", "stage_failed", job_id=job_id, stage=stage, error=error_msg)
-                _update_job_status(job_id, status="failed", error=error_msg)
+                log_event("ERROR", "deterministic_failure", job_id=job_id, stage=stage, error=error_msg)
+                # Before raising the exception, update the status to FAILED.
+                # This provides immediate feedback via the API. When Dramatiq
+                # retries, the status will be updated back to RUNNING.
+                _update_job_status(job_id, status=JobStatus.FAILED, error=error_msg)
                 raise Exception(error_msg)
 
-            # Simulate processing time
-            stage_duration = STAGE_DURATIONS[stage]
-            time.sleep(stage_duration)
-            elapsed += stage_duration
+            time.sleep(STAGE_DURATIONS[stage])
+            elapsed_time += STAGE_DURATIONS[stage]
+            log_event("INFO", "stage_completed", job_id=job_id, stage=stage)
 
-            # Update progress
-            progress = int((elapsed / total_duration) * 100)
-            _update_job_status(job_id, progress=progress)
-
-            log_event("INFO", "stage_completed", job_id=job_id, stage=stage, progress=progress)
-
-        # Mark job as completed
+        # Mark job as completed successfully
         result = {
             "stages_completed": stages,
-            "total_duration_seconds": elapsed,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "total_duration_seconds": elapsed_time,
+            "completed_at": datetime.now(UTC).isoformat(),
         }
-        _update_job_status(job_id, status="completed", progress=100, result=result)
-        log_event("INFO", "job_completed", job_id=job_id, result=result)
+        _update_job_status(job_id, status=JobStatus.SUCCEEDED, progress=100, result=result, stage="finished")
+        log_event("INFO", "job_processing_succeeded", job_id=job_id)
 
     except Exception as e:
-        log_event("ERROR", "job_failed", job_id=job_id, error=str(e))
-        _update_job_status(job_id, status="failed", error=str(e))
+        # This is a catch-all for unexpected errors. We log the error and
+        # update the job's status to FAILED. Then, we re-raise the exception
+        # to let Dramatiq handle the retry logic.
+        log_event("ERROR", "job_processing_failed", job_id=job_id, error=str(e))
+        _update_job_status(job_id, status=JobStatus.FAILED, error=str(e), stage="error")
         raise
