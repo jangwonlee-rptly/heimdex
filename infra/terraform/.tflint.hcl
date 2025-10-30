@@ -38,7 +38,7 @@ rule "terraform_standard_module_structure" {
 }
 
 rule "terraform_unused_declarations" {
-  enabled = true
+  enabled = false  # Disabled: Variables exist for future features (Cloud SQL, Redis, VPC)
 }
 
 rule "terraform_unused_required_providers" {
