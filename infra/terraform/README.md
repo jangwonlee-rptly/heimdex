@@ -12,6 +12,8 @@ This directory contains Infrastructure-as-Code for deploying Heimdex to Google C
 
 ## Quick Start
 
+### Local Development
+
 1. **Copy the example variables file:**
    ```bash
    cp terraform.tfvars.example terraform.tfvars
@@ -45,6 +47,30 @@ This directory contains Infrastructure-as-Code for deploying Heimdex to Google C
    ```bash
    terraform apply tfplan
    ```
+
+### Enabling GitHub Actions CI/CD
+
+The Terraform plan/apply jobs are **disabled by default** to avoid errors when GCP credentials aren't configured.
+
+**To enable Terraform automation in GitHub Actions:**
+
+1. **Add Repository Secrets** (Settings → Secrets and variables → Actions → New repository secret):
+   - `GCP_PROJECT_ID`: Your GCP project ID
+   - `DEV_JWT_SECRET`: Strong random secret for dev JWT signing (32+ characters)
+
+2. **Add Repository Variable** (Settings → Secrets and variables → Actions → Variables tab):
+   - Name: `TERRAFORM_ENABLED`
+   - Value: `true`
+
+3. **What will run:**
+   - **On Pull Requests**: `terraform plan` runs and comments the plan on the PR
+   - **On Push to main**: `terraform plan` runs (manual apply required via environment approval)
+
+**Jobs that always run** (no credentials needed):
+- Terraform format check
+- Terraform validate
+- TFLint
+- TFSec security scan
 
 ## Architecture
 

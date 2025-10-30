@@ -93,7 +93,9 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: [validate, lint, security]
-    if: github.event_name == 'pull_request'
+    # Only run if secrets are configured AND it's a PR
+    # To enable: Add GCP_PROJECT_ID and DEV_JWT_SECRET to GitHub repo secrets
+    if: github.event_name == 'pull_request' && vars.TERRAFORM_ENABLED == 'true'
     defaults:
       run:
         working-directory: ./infra/terraform
@@ -147,7 +149,10 @@ jobs:
     name: Terraform Apply (Manual)
     runs-on: ubuntu-latest
     needs: [validate, lint, security]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Only run if secrets are configured AND pushing to main
+    # To enable: Add GCP_PROJECT_ID and DEV_JWT_SECRET to GitHub repo secrets
+    # AND set TERRAFORM_ENABLED variable to 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.TERRAFORM_ENABLED == 'true'
     environment: production
     defaults:
       run:
