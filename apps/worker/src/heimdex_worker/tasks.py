@@ -68,17 +68,41 @@ def _update_job_status(
     """
     with get_db() as session:
         repo = JobRepository(session)
-        # The `update_job_with_stage_progress` method is a convenient way to
-        # update the job's primary status while also logging rich, structured
-        # details about the current stage and progress.
-        repo.update_job_with_stage_progress(
-            job_id=uuid.UUID(job_id),
-            status=status.value if status else None,
-            stage=stage,
-            progress=progress,
-            result=result,
-            error=error,
-        )
+
+        # If we have result or error, use update_job_status with event_detail
+        if result is not None or error is not None:
+            event_detail: dict = {}
+            if stage is not None:
+                event_detail["stage"] = stage
+            if progress is not None:
+                event_detail["progress"] = progress
+            if result is not None:
+                event_detail["result"] = result
+
+            if status:
+                repo.update_job_status(
+                    job_id=uuid.UUID(job_id),
+                    status=status,
+                    last_error_message=error,
+                    log_event=True,
+                    event_detail=event_detail if event_detail else None,
+                )
+        # Otherwise, use update_job_with_stage_progress for stage/progress updates
+        elif stage is not None and progress is not None:
+            repo.update_job_with_stage_progress(
+                job_id=uuid.UUID(job_id),
+                stage=stage,
+                progress=progress,
+                status=status,
+            )
+        # Status-only update
+        elif status is not None:
+            repo.update_job_status(
+                job_id=uuid.UUID(job_id),
+                status=status,
+                last_error_message=error,
+                log_event=True,
+            )
 
 
 @dramatiq.actor(
@@ -132,7 +156,9 @@ def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
 
             if stage == fail_at_stage:
                 error_msg = f"Deterministic failure at stage: {stage}"
-                log_event("ERROR", "deterministic_failure", job_id=job_id, stage=stage, error=error_msg)
+                log_event(
+                    "ERROR", "deterministic_failure", job_id=job_id, stage=stage, error=error_msg
+                )
                 # Before raising the exception, update the status to FAILED.
                 # This provides immediate feedback via the API. When Dramatiq
                 # retries, the status will be updated back to RUNNING.
@@ -149,7 +175,9 @@ def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
             "total_duration_seconds": elapsed_time,
             "completed_at": datetime.now(UTC).isoformat(),
         }
-        _update_job_status(job_id, status=JobStatus.SUCCEEDED, progress=100, result=result, stage="finished")
+        _update_job_status(
+            job_id, status=JobStatus.SUCCEEDED, progress=100, result=result, stage="finished"
+        )
         log_event("INFO", "job_processing_succeeded", job_id=job_id)
 
     except Exception as e:

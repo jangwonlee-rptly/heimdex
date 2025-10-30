@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 class ProbeCacheEntry(TypedDict):
     """Internal structure for a cached probe result."""
+
     result: DepProbeResult
     expires_at: float
 
@@ -172,6 +173,7 @@ def _probe_redis_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 def _probe_qdrant_once(timeout_ms: int) -> tuple[bool, float, str | None]:
     """Performs a single GET request to the Qdrant root endpoint."""
     import requests
+
     config = get_config()
     start = time.perf_counter()
     try:
@@ -204,7 +206,9 @@ def _probe_gcs_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 ProbeFn = Callable[[int], tuple[bool, float, str | None]]
 
 
-def _probe_with_retry(dep_name: str, probe_fn: ProbeFn, timeout_ms: int, retries: int) -> DepProbeResult:
+def _probe_with_retry(
+    dep_name: str, probe_fn: ProbeFn, timeout_ms: int, retries: int
+) -> DepProbeResult:
     """
     A higher-order function that orchestrates the probing of a dependency with retries.
 
@@ -223,20 +227,38 @@ def _probe_with_retry(dep_name: str, probe_fn: ProbeFn, timeout_ms: int, retries
         total_latency += latency_ms
         if success:
             return {
-                "enabled": True, "skipped": False, "ok": True,
-                "latency_ms": round(latency_ms, 2), "attempts": attempt + 1, "reason": None,
+                "enabled": True,
+                "skipped": False,
+                "ok": True,
+                "latency_ms": round(latency_ms, 2),
+                "attempts": attempt + 1,
+                "reason": None,
             }
         last_error = error
-        logger.error(json.dumps({
-            "ts": datetime.now(UTC).isoformat(), "level": "WARN", "msg": "probe_attempt_failed",
-            "dep": dep_name, "attempt": attempt + 1, "max_attempts": retries + 1,
-            "elapsed_ms": round(latency_ms, 2), "reason": error,
-        }, separators=(",", ":")))
+        logger.error(
+            json.dumps(
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "level": "WARN",
+                    "msg": "probe_attempt_failed",
+                    "dep": dep_name,
+                    "attempt": attempt + 1,
+                    "max_attempts": retries + 1,
+                    "elapsed_ms": round(latency_ms, 2),
+                    "reason": error,
+                },
+                separators=(",", ":"),
+            )
+        )
         if attempt < retries:
             _jittered_backoff(attempt)
     return {
-        "enabled": True, "skipped": False, "ok": False,
-        "latency_ms": round(total_latency / (retries + 1), 2), "attempts": retries + 1, "reason": last_error,
+        "enabled": True,
+        "skipped": False,
+        "ok": False,
+        "latency_ms": round(total_latency / (retries + 1), 2),
+        "attempts": retries + 1,
+        "reason": last_error,
     }
 
 
@@ -277,21 +299,29 @@ def probe_dependency(dep_name: str) -> DepProbeResult:
     """
     config = get_config()
     enabled_map = {
-        "pg": config.enable_pg, "redis": config.enable_redis,
-        "qdrant": config.enable_qdrant, "gcs": config.enable_gcs,
+        "pg": config.enable_pg,
+        "redis": config.enable_redis,
+        "qdrant": config.enable_qdrant,
+        "gcs": config.enable_gcs,
     }
     if dep_name not in enabled_map:
         raise ValueError(f"Unknown dependency: {dep_name}")
     if not enabled_map[dep_name]:
         return {
-            "enabled": False, "skipped": True, "ok": None,
-            "latency_ms": None, "attempts": 0, "reason": "disabled",
+            "enabled": False,
+            "skipped": True,
+            "ok": None,
+            "latency_ms": None,
+            "attempts": 0,
+            "reason": "disabled",
         }
     if cached := _get_cached_probe(dep_name):
         return cached
     probe_fn_map = {
-        "pg": _probe_postgres_once, "redis": _probe_redis_once,
-        "qdrant": _probe_qdrant_once, "gcs": _probe_gcs_once,
+        "pg": _probe_postgres_once,
+        "redis": _probe_redis_once,
+        "qdrant": _probe_qdrant_once,
+        "gcs": _probe_gcs_once,
     }
     result = _probe_with_retry(
         dep_name=dep_name,
@@ -300,7 +330,8 @@ def probe_dependency(dep_name: str) -> DepProbeResult:
         retries=config.probe_retries,
     )
     _cache_probe(
-        dep_name=dep_name, result=result,
+        dep_name=dep_name,
+        result=result,
         cache_sec=config.probe_cache_sec,
         cooldown_sec=config.probe_cooldown_sec,
     )
@@ -332,18 +363,27 @@ def check_readiness(service: str, version: str) -> ReadinessResult:
     }
     enabled_deps = [dep for dep in deps.values() if dep["enabled"]]
     ready = all(dep["ok"] for dep in enabled_deps) if enabled_deps else True
-    summary = "ok" if ready else "down"
+    summary: Literal["ok", "degraded", "down"] = "ok" if ready else "down"
     log_data = {
-        "ts": datetime.now(UTC).isoformat(), "level": "INFO", "msg": "readiness_check",
-        "service": service, "env": config.environment, "version": version, "ready": ready,
+        "ts": datetime.now(UTC).isoformat(),
+        "level": "INFO",
+        "msg": "readiness_check",
+        "service": service,
+        "env": config.environment,
+        "version": version,
+        "ready": ready,
         "summary": summary,
         "deps_ok": [name for name, d in deps.items() if d["enabled"] and d["ok"]],
         "deps_fail": [name for name, d in deps.items() if d["enabled"] and not d["ok"]],
     }
     logger.info(json.dumps(log_data, separators=(",", ":")))
     return {
-        "service": service, "env": config.environment, "version": version,
-        "ready": ready, "summary": summary, "deps": deps,
+        "service": service,
+        "env": config.environment,
+        "version": version,
+        "ready": ready,
+        "summary": summary,
+        "deps": deps,
     }
 
 

@@ -84,7 +84,9 @@ async def on_shutdown() -> None:
 
 
 @app.middleware("http")
-async def request_logger(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+async def request_logger(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """
     A middleware that logs every incoming HTTP request and its response.
 
@@ -132,8 +134,11 @@ async def healthz() -> JSONResponse:
         A JSON response indicating the service is alive ("ok": True).
     """
     payload = {
-        "ok": True, "service": SERVICE_NAME, "version": __version__,
-        "env": _ENV, "started_at": _STARTED_AT_ISO,
+        "ok": True,
+        "service": SERVICE_NAME,
+        "version": __version__,
+        "env": _ENV,
+        "started_at": _STARTED_AT_ISO,
     }
     return JSONResponse(content=payload)
 
@@ -141,22 +146,22 @@ async def healthz() -> JSONResponse:
 @app.get("/readyz", tags=["health"], response_class=JSONResponse)
 async def readyz() -> JSONResponse:
     """
-    Provides a comprehensive readiness probe endpoint.
+        Provides a comprehensive readiness probe endpoint.
 
-    A readiness probe is used to determine if a container is ready to start
-    accepting traffic. This is a more in-depth check than the liveness probe. It
-    verifies the health of all critical downstream dependencies (like the database
-    and Redis) using the profile-aware `check_readiness` function from the common
-    probes module.
+        A readiness probe is used to determine if a container is ready to start
+        accepting traffic. This is a more in-depth check than the liveness probe. It
+        verifies the health of all critical downstream dependencies (like the database
+        and Redis) using the profile-aware `check_readiness` function from the common
+        probes module.
 
-    If any *enabled* dependency is unhealthy, this endpoint will return an
-    HTTP 503 Service Unavailable status. This signals to the orchestrator (or
-    load balancer) that it should not route traffic to this instance of the
-agb service until the dependencies are healthy again.
+        If any *enabled* dependency is unhealthy, this endpoint will return an
+        HTTP 503 Service Unavailable status. This signals to the orchestrator (or
+        load balancer) that it should not route traffic to this instance of the
+    agb service until the dependencies are healthy again.
 
-    Returns:
-        A detailed JSON response on the status of all dependencies. The HTTP
-        status code will be 200 if ready, or 503 if not.
+        Returns:
+            A detailed JSON response on the status of all dependencies. The HTTP
+            status code will be 200 if ready, or 503 if not.
     """
     from heimdex_common.probes import check_readiness
 

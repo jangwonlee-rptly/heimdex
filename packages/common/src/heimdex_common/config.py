@@ -80,11 +80,21 @@ class HeimdexConfig(BaseSettings):
     )
 
     # --- PostgreSQL Connection ---
-    pghost: str = Field(default="localhost", alias="PGHOST", description="Hostname of the PostgreSQL database.")
-    pgport: int = Field(default=5432, alias="PGPORT", description="Port of the PostgreSQL database.")
-    pguser: str = Field(default="heimdex", alias="PGUSER", description="Username for the PostgreSQL database.")
-    pgpassword: str = Field(default="heimdex", alias="PGPASSWORD", description="Password for the PostgreSQL database.")
-    pgdatabase: str = Field(default="heimdex", alias="PGDATABASE", description="Name of the PostgreSQL database.")
+    pghost: str = Field(
+        default="localhost", alias="PGHOST", description="Hostname of the PostgreSQL database."
+    )
+    pgport: int = Field(
+        default=5432, alias="PGPORT", description="Port of the PostgreSQL database."
+    )
+    pguser: str = Field(
+        default="heimdex", alias="PGUSER", description="Username for the PostgreSQL database."
+    )
+    pgpassword: str = Field(
+        default="heimdex", alias="PGPASSWORD", description="Password for the PostgreSQL database."
+    )
+    pgdatabase: str = Field(
+        default="heimdex", alias="PGDATABASE", description="Name of the PostgreSQL database."
+    )
 
     # --- Redis Connection ---
     redis_url: str = Field(
@@ -112,9 +122,17 @@ class HeimdexConfig(BaseSettings):
             "development, this points to a MinIO container."
         ),
     )
-    gcs_bucket: str = Field(default="heimdex-dev", alias="GCS_BUCKET", description="The name of the GCS bucket for asset storage.")
-    gcs_project_id: str = Field(default="heimdex-local", alias="GCS_PROJECT_ID", description="The GCS project ID.")
-    gcs_use_ssl: bool = Field(default=False, alias="GCS_USE_SSL", description="Whether to use SSL for GCS connections.")
+    gcs_bucket: str = Field(
+        default="heimdex-dev",
+        alias="GCS_BUCKET",
+        description="The name of the GCS bucket for asset storage.",
+    )
+    gcs_project_id: str = Field(
+        default="heimdex-local", alias="GCS_PROJECT_ID", description="The GCS project ID."
+    )
+    gcs_use_ssl: bool = Field(
+        default=False, alias="GCS_USE_SSL", description="Whether to use SSL for GCS connections."
+    )
     google_application_credentials: str | None = Field(
         default=None,
         alias="GOOGLE_APPLICATION_CREDENTIALS",
@@ -126,25 +144,48 @@ class HeimdexConfig(BaseSettings):
     # the API server needs Postgres and Redis, but the worker might not need
     # a direct Postgres connection. This allows readiness probes to be tailored
     # to the specific dependencies of each service.
-    enable_pg: bool = Field(default=True, alias="ENABLE_PG", description="Enable PostgreSQL dependency check.")
-    enable_redis: bool = Field(default=True, alias="ENABLE_REDIS", description="Enable Redis dependency check.")
-    enable_qdrant: bool = Field(default=False, alias="ENABLE_QDRANT", description="Enable Qdrant dependency check.")
-    enable_gcs: bool = Field(default=False, alias="ENABLE_GCS", description="Enable GCS dependency check.")
+    enable_pg: bool = Field(
+        default=True, alias="ENABLE_PG", description="Enable PostgreSQL dependency check."
+    )
+    enable_redis: bool = Field(
+        default=True, alias="ENABLE_REDIS", description="Enable Redis dependency check."
+    )
+    enable_qdrant: bool = Field(
+        default=False, alias="ENABLE_QDRANT", description="Enable Qdrant dependency check."
+    )
+    enable_gcs: bool = Field(
+        default=False, alias="ENABLE_GCS", description="Enable GCS dependency check."
+    )
 
     # --- Probe Tunables ---
     # These settings control the behavior of the health and readiness probes,
     # allowing for fine-tuning of timeouts, retries, and caching to make the
     # system more resilient to transient failures.
-    probe_timeout_ms: int = Field(default=300, alias="PROBE_TIMEOUT_MS", description="Probe timeout in milliseconds.")
-    probe_retries: int = Field(default=2, alias="PROBE_RETRIES", description="Number of retries for failed probes.")
-    probe_cooldown_sec: int = Field(default=30, alias="PROBE_COOLDOWN_SEC", description="Cooldown period for failed probes (seconds).")
-    probe_cache_sec: int = Field(default=10, alias="PROBE_CACHE_SEC", description="Cache duration for successful probes (seconds).")
+    probe_timeout_ms: int = Field(
+        default=300, alias="PROBE_TIMEOUT_MS", description="Probe timeout in milliseconds."
+    )
+    probe_retries: int = Field(
+        default=2, alias="PROBE_RETRIES", description="Number of retries for failed probes."
+    )
+    probe_cooldown_sec: int = Field(
+        default=30,
+        alias="PROBE_COOLDOWN_SEC",
+        description="Cooldown period for failed probes (seconds).",
+    )
+    probe_cache_sec: int = Field(
+        default=10,
+        alias="PROBE_CACHE_SEC",
+        description="Cache duration for successful probes (seconds).",
+    )
 
     # --- Authentication Configuration ---
     auth_provider: Literal["supabase", "dev"] = Field(
         default="dev",
         alias="AUTH_PROVIDER",
-        description="The authentication provider to use. 'supabase' for production, 'dev' for local development.",
+        description=(
+            "The authentication provider to use. 'supabase' for production, "
+            "'dev' for local development."
+        ),
     )
     supabase_jwks_url: str | None = Field(
         default=None,
@@ -246,7 +287,8 @@ class HeimdexConfig(BaseSettings):
                 missing_fields.append("AUTH_ISSUER")
             if missing_fields:
                 raise ValueError(
-                    f"AUTH_PROVIDER=supabase requires the following fields: {', '.join(missing_fields)}"
+                    f"AUTH_PROVIDER=supabase requires the following fields: "
+                    f"{', '.join(missing_fields)}"
                 )
 
     def get_database_url(self, driver: str = "postgresql+psycopg2") -> str:

@@ -132,7 +132,9 @@ class JobRepository:
 
     def get_latest_job_event(self, job_id: uuid.UUID) -> JobEvent | None:
         """Efficiently retrieves only the most recent event for a given job."""
-        stmt = select(JobEvent).where(JobEvent.job_id == job_id).order_by(desc(JobEvent.ts)).limit(1)
+        stmt = (
+            select(JobEvent).where(JobEvent.job_id == job_id).order_by(desc(JobEvent.ts)).limit(1)
+        )
         return self.session.execute(stmt).scalar_one_or_none()
 
     def update_job_status(
@@ -176,7 +178,12 @@ class JobRepository:
 
         if status == JobStatus.RUNNING and job.started_at is None:
             job.started_at = datetime.now(UTC)
-        if status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.DEAD_LETTER}:
+        if status in {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+            JobStatus.DEAD_LETTER,
+        }:
             job.finished_at = datetime.now(UTC)
 
         if log_event:
@@ -253,7 +260,9 @@ class JobRepository:
         self.session.flush()
         return event
 
-    def get_queued_jobs(self, org_id: uuid.UUID, limit: int = 10, job_type: str | None = None) -> Sequence[Job]:
+    def get_queued_jobs(
+        self, org_id: uuid.UUID, limit: int = 10, job_type: str | None = None
+    ) -> Sequence[Job]:
         """
         Fetches a batch of queued jobs, ready for processing by a worker.
 
@@ -274,7 +283,9 @@ class JobRepository:
             stmt = stmt.where(Job.type == job_type)
         return self.session.execute(stmt).scalars().all()
 
-    def get_jobs_by_status(self, org_id: uuid.UUID, status: JobStatus, limit: int = 100) -> Sequence[Job]:
+    def get_jobs_by_status(
+        self, org_id: uuid.UUID, status: JobStatus, limit: int = 100
+    ) -> Sequence[Job]:
         """Retrieves jobs for an organization, filtered by a specific status."""
         stmt = (
             select(Job)
@@ -295,7 +306,9 @@ class JobRepository:
         Returns:
             A dictionary mapping status names to their respective counts.
         """
-        stmt = select(Job.status, func.count(Job.id)).where(Job.org_id == org_id).group_by(Job.status)
+        stmt = (
+            select(Job.status, func.count(Job.id)).where(Job.org_id == org_id).group_by(Job.status)
+        )
         results = self.session.execute(stmt).all()
         return {status.value: count for status, count in results}
 

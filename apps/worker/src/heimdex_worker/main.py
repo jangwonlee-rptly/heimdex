@@ -97,7 +97,7 @@ def main() -> int:
         "INFO",
         "starting_heartbeat",
         details={
-            "interval_seconds": _HEARTBEART_INTERVAL,
+            "interval_seconds": _HEARTBEAT_INTERVAL,
             "config_summary": config.log_summary(redact_secrets=True),
         },
     )

@@ -70,7 +70,8 @@ class JobCreateRequest(BaseModel):
 
     type: str = Field(default="mock_process", description="The type of job to create.")
     fail_at_stage: str | None = Field(
-        default=None, description="For testing: stage at which the job should deterministically fail."
+        default=None,
+        description="For testing: stage at which the job should deterministically fail.",
     )
 
 
@@ -161,7 +162,7 @@ async def create_job(
     # We manually construct a Dramatiq message here. This is a deliberate
     # choice to avoid a direct import dependency from the `api` service to the
     # `worker` service. This maintains the decoupling between the two services.
-    message = dramatiq.Message(
+    message: dramatiq.Message = dramatiq.Message(
         queue_name="default",
         actor_name="process_mock",  # The name of the function the worker should call
         args=(job_id, request.fail_at_stage),
@@ -215,8 +216,12 @@ async def get_job_status(
 
         # Backward-compatible status mapping for older clients
         status_mapping = {
-            "queued": "pending", "running": "processing", "succeeded": "completed",
-            "failed": "failed", "canceled": "canceled", "dead_letter": "failed",
+            "queued": "pending",
+            "running": "processing",
+            "succeeded": "completed",
+            "failed": "failed",
+            "canceled": "canceled",
+            "dead_letter": "failed",
         }
         status = status_mapping.get(job.status.value, job.status.value)
 

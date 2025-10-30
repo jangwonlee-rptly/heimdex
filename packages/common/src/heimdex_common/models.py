@@ -132,23 +132,42 @@ class Job(Base):
     # State Machine and Retry Control
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus, name="job_status", values_callable=lambda e: [i.value for i in e]),
-        nullable=False, default=JobStatus.QUEUED, server_default=text("'queued'")
+        nullable=False,
+        default=JobStatus.QUEUED,
+        server_default=text("'queued'"),
     )
-    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default=text("5"))
+    attempt: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default=text("5")
+    )
     backoff_policy: Mapped[BackoffPolicy] = mapped_column(
-        SAEnum(BackoffPolicy, name="job_backoff_policy", values_callable=lambda e: [i.value for i in e]),
-        nullable=False, default=BackoffPolicy.EXPONENTIAL, server_default=text("'exp'")
+        SAEnum(
+            BackoffPolicy, name="job_backoff_policy", values_callable=lambda e: [i.value for i in e]
+        ),
+        nullable=False,
+        default=BackoffPolicy.EXPONENTIAL,
+        server_default=text("'exp'"),
     )
-    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     # Idempotency and Attribution
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
     requested_by: Mapped[str | None] = mapped_column(String(255))
 
     # Timestamps for Auditing and Analytics
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"))
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"), onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+        onupdate=datetime.utcnow,
+    )
     started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
@@ -158,7 +177,10 @@ class Job(Base):
 
     # Relationships
     events: Mapped[list[JobEvent]] = relationship(
-        "JobEvent", back_populates="job", cascade="all, delete-orphan", order_by="JobEvent.ts.desc()"
+        "JobEvent",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="JobEvent.ts.desc()",
     )
 
     __table_args__ = (
@@ -166,7 +188,13 @@ class Job(Base):
         # enforces that for a given organization, the idempotency_key must be
         # unique, but only when it's not NULL. This allows clients to retry
         # job creation safely without creating duplicate jobs.
-        Index("idx_job__org_id_idempotency_key", "org_id", "idempotency_key", unique=True, postgresql_where=text("idempotency_key IS NOT NULL")),
+        Index(
+            "idx_job__org_id_idempotency_key",
+            "org_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         # A composite index to optimize the most common query pattern: fetching
         # the most recent jobs for a specific organization.
         Index("idx_job__org_id_created_at_desc", "org_id", desc("created_at")),
@@ -177,7 +205,8 @@ class Job(Base):
         # ensures data integrity by requiring `finished_at` to be set if and
         # only if the job is in a terminal state.
         CheckConstraint(
-            "((status IN ('succeeded', 'failed', 'canceled', 'dead_letter')) AND finished_at IS NOT NULL) OR "
+            "((status IN ('succeeded', 'failed', 'canceled', 'dead_letter')) "
+            "AND finished_at IS NOT NULL) OR "
             "((status IN ('queued', 'running')) AND finished_at IS NULL)",
             name="status_finished_at_consistency",
         ),
