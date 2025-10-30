@@ -120,15 +120,22 @@ def _update_job_status(
 )
 def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
     """
-    A Dramatiq actor that simulates a multi-stage background job.
+    A Dramatiq actor that simulates a multi-stage background job with idempotency.
 
-    This function serves as a template and a testing tool for the background
-    processing system. It demonstrates the key responsibilities of an actor:
-    1.  Marking the job as `RUNNING` when it starts.
-    2.  Periodically updating the job's progress and current stage.
-    3.  Handling potential failures and allowing Dramatiq's retry logic to take over.
-    4.  Marking the job as `SUCCEEDED` upon successful completion and storing the result.
-    5.  Marking the job as `FAILED` if a non-transient error occurs.
+    This function is idempotent and re-entrant, following the requirement for
+    at-least-once delivery semantics. If Dramatiq delivers the same message
+    multiple times (due to retries or other reasons), this function will:
+    1. Check if the job is already in a terminal state
+    2. If yes, no-op and return immediately (idempotent)
+    3. If no, proceed with processing
+
+    Key responsibilities:
+    1.  **Idempotency Check**: Verify job is not already complete
+    2.  Marking the job as `RUNNING` when it starts
+    3.  Periodically updating the job's progress and current stage
+    4.  Handling potential failures and allowing Dramatiq's retry logic to take over
+    5.  Marking the job as `SUCCEEDED` upon successful completion
+    6.  Marking the job as `FAILED` if a non-transient error occurs
 
     Args:
         job_id: The UUID of the job to process, passed from the enqueued message.
@@ -142,6 +149,34 @@ def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
     """
     log_event("INFO", "job_processing_started", job_id=job_id, fail_at_stage=fail_at_stage)
 
+    # CRITICAL IDEMPOTENCY CHECK: Verify the job is not already in a terminal state
+    # This prevents double-processing if Dramatiq delivers the message multiple times
+    with get_db() as session:
+        repo = JobRepository(session)
+        job = repo.get_job_by_id(uuid.UUID(job_id))
+
+        if not job:
+            log_event("ERROR", "job_not_found", job_id=job_id)
+            return  # Job doesn't exist, nothing to do
+
+        # Terminal states: job is already done, no-op to maintain idempotency
+        terminal_states = {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+            JobStatus.DEAD_LETTER,
+        }
+        if job.status in terminal_states:
+            log_event(
+                "INFO",
+                "job_already_terminal",
+                job_id=job_id,
+                status=job.status.value,
+                message="Idempotent no-op: job already in terminal state",
+            )
+            return  # Idempotent return: job already processed
+
+    # Proceed with processing only if job is not terminal
     try:
         _update_job_status(job_id, status=JobStatus.RUNNING, progress=0, stage="starting")
 

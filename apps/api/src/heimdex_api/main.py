@@ -58,6 +58,8 @@ async def on_startup() -> None:
     """
     from heimdex_common.config import get_config
 
+    from .outbox_dispatcher import start_dispatcher_thread
+
     config = get_config()
     log_event(
         "INFO",
@@ -68,6 +70,10 @@ async def on_startup() -> None:
             "config_summary": config.log_summary(redact_secrets=True),
         },
     )
+
+    # Start the outbox dispatcher background thread
+    start_dispatcher_thread()
+    log_event("INFO", "outbox_dispatcher_started")
 
 
 @app.on_event("shutdown")

@@ -24,6 +24,7 @@ from enum import Enum
 
 from sqlalchemy import (
     TIMESTAMP,
+    BigInteger,
     CheckConstraint,
     Enum as SAEnum,
     ForeignKey,
@@ -156,6 +157,9 @@ class Job(Base):
 
     # Idempotency and Attribution
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
+    job_key: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True
+    )  # Server-side deterministic idempotency key (SHA256 hash)
     requested_by: Mapped[str | None] = mapped_column(String(255))
 
     # Timestamps for Auditing and Analytics
@@ -271,3 +275,61 @@ class JobEvent(Base):
     def __repr__(self) -> str:
         status_flow = f"{self.prev_status} -> {self.next_status}"
         return f"<JobEvent(id={self.id}, job_id={self.job_id}, status='{status_flow}')>"
+
+
+class Outbox(Base):
+    """
+    Transactional Outbox for Reliable Message Publishing.
+
+    This model implements the transactional outbox pattern, ensuring exactly-once
+    message delivery semantics between the database and the message broker. By
+    writing both the job record and the outbox message within the same database
+    transaction, we eliminate the split-brain problem where a job exists in the
+    database but was never published to the queue, or vice versa.
+
+    The outbox dispatcher service reads unsent messages from this table and
+    publishes them to Dramatiq, marking them as sent only after successful
+    broker acknowledgment.
+
+    Attributes:
+        id: The primary key, auto-incrementing BIGSERIAL for performance.
+        job_id: Foreign key to the job this message is for.
+        task_name: The name of the Dramatiq actor to invoke (e.g., "process_mock").
+        payload: JSONB containing the message arguments and metadata.
+        sent_at: Timestamp of successful publish; NULL indicates pending.
+        fail_count: Number of failed publish attempts for retry logic.
+        last_error: The most recent error message from a failed publish attempt.
+        created_at: Timestamp of outbox record creation.
+    """
+
+    __tablename__ = "outbox"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    fail_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    last_error: Mapped[str | None] = mapped_column(String(2048))
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+
+    __table_args__ = (
+        # Critical index for the outbox dispatcher to efficiently find unsent messages.
+        # Uses a partial index (WHERE sent_at IS NULL) to keep the index small and fast.
+        Index("idx_outbox_unsent", "created_at", postgresql_where=text("sent_at IS NULL")),
+        # Index on job_id for finding all outbox records related to a specific job.
+        {"comment": "Transactional outbox for exactly-once message delivery"},
+    )
+
+    def __repr__(self) -> str:
+        status = "sent" if self.sent_at else "pending"
+        return (
+            f"<Outbox(id={self.id}, job_id={self.job_id}, "
+            f"task={self.task_name}, status={status})>"
+        )

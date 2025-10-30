@@ -34,6 +34,8 @@ from redis import Redis
 
 from heimdex_common.auth import RequestContext, verify_jwt
 from heimdex_common.db import get_db
+from heimdex_common.job_utils import make_job_key
+from heimdex_common.models import Job, JobStatus, Outbox
 from heimdex_common.repositories import JobRepository
 
 # --- Dramatiq Broker Setup ---
@@ -127,49 +129,99 @@ async def create_job(
     ctx: Annotated[RequestContext, Depends(verify_jwt)],
 ) -> JobCreateResponse:
     """
-    Creates a new job record and enqueues it for background processing.
+    Creates a new job with transactional outbox pattern for exactly-once delivery.
 
-    This endpoint orchestrates the two main steps of starting a job:
-    1.  **Persistence**: It uses the `JobRepository` to create a new `Job` row
-        in the database. This record acts as the durable source of truth for
-        the job's state. The job is immediately associated with the authenticated
-        user's organization (`ctx.org_id`).
-    2.  **Enqueuing**: It constructs and sends a `dramatiq.Message` to the Redis
-        broker. This message contains the `job_id` and any other parameters
-        the worker needs to perform the task.
+    This endpoint implements the transactional outbox pattern to guarantee
+    exactly-once message delivery semantics. The critical improvement over the
+    previous implementation is that both the job record AND the outbox message
+    are written in a single atomic database transaction.
 
-    By creating the database record *before* enqueuing the task, we ensure that
-    even if the worker picks up the job instantly, a corresponding record will
-    be there to update.
+    Workflow:
+    1.  Compute a deterministic job_key from org_id, job_type, and payload
+    2.  Check if a job with this key already exists (idempotency)
+    3.  Within a single transaction:
+        a. Create the Job record in QUEUED state
+        b. Create a JobEvent for ENQUEUED
+        c. Create an Outbox record with the Dramatiq message payload
+    4.  Commit the transaction
+    5.  The outbox dispatcher (running in a background thread) will later:
+        a. Read unsent outbox messages
+        b. Publish them to Dramatiq
+        c. Mark them as sent
+
+    This eliminates the split-brain risk where a job could exist in the database
+    but never be published to the queue, or vice versa.
 
     Args:
         request: The validated request body.
-        ctx: The authenticated request context, injected by the `verify_jwt`
-             dependency.
+        ctx: The authenticated request context from JWT verification.
 
     Returns:
-        A `JobCreateResponse` containing the new job's UUID.
+        A `JobCreateResponse` containing the job UUID (new or existing).
     """
+    org_id = uuid.UUID(ctx.org_id)
+
+    # Define the payload subset used for job_key computation
+    # Only include fields that affect idempotency (not transient fields)
+    payload_for_key = {
+        "type": request.type,
+        # For mock jobs, fail_at_stage doesn't affect idempotency
+        # For real jobs, include stable identifiers like video_id, file_path, etc.
+    }
+
+    # Compute deterministic job_key for server-side idempotency
+    job_key = make_job_key(org_id, request.type, payload_for_key)
+
     with get_db() as session:
         repo = JobRepository(session)
-        job = repo.create_job(
-            org_id=uuid.UUID(ctx.org_id),
-            job_type=request.type,
+
+        # Check if job already exists (idempotency check happens in repository)
+        existing_job = repo.get_job_by_job_key(job_key)
+        if existing_job:
+            return JobCreateResponse(job_id=str(existing_job.id))
+
+        # Create the job first to get the ID
+        job = Job(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            type=request.type,
+            status=JobStatus.QUEUED,
+            job_key=job_key,
             requested_by=ctx.user_id,
         )
+        session.add(job)
+        session.flush()  # Get the job.id
+
+        # Log the initial event
+        repo.log_job_event(
+            job_id=job.id,
+            prev_status=None,
+            next_status=JobStatus.QUEUED.value,
+        )
+
+        # NOW prepare the outbox payload with the actual job_id
+        outbox_payload = {
+            "queue_name": "default",
+            "args": (str(job.id), request.fail_at_stage),
+            "kwargs": {},
+            "options": {},
+        }
+
+        # Write to outbox in the same transaction
+        outbox_message = Outbox(
+            job_id=job.id,
+            task_name="process_mock",
+            payload=outbox_payload,
+        )
+        session.add(outbox_message)
+
+        # Commit the transaction (job + event + outbox)
+        session.commit()
+
         job_id = str(job.id)
 
-    # We manually construct a Dramatiq message here. This is a deliberate
-    # choice to avoid a direct import dependency from the `api` service to the
-    # `worker` service. This maintains the decoupling between the two services.
-    message: dramatiq.Message = dramatiq.Message(
-        queue_name="default",
-        actor_name="process_mock",  # The name of the function the worker should call
-        args=(job_id, request.fail_at_stage),
-        kwargs={},
-        options={},
-    )
-    broker.enqueue(message)
+    # DO NOT call broker.enqueue() here!
+    # The outbox dispatcher will handle publishing asynchronously.
 
     return JobCreateResponse(job_id=job_id)
 

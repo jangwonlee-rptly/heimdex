@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Job, JobEvent, JobStatus
+from ..models import Job, JobEvent, JobStatus, Outbox
 
 
 class JobRepository:
@@ -106,6 +106,138 @@ class JobRepository:
         )
 
         return job
+
+    def create_job_with_outbox(
+        self,
+        org_id: uuid.UUID,
+        job_type: str,
+        job_key: str,
+        task_name: str,
+        payload: dict[str, Any],
+        requested_by: str | None = None,
+        priority: int = 0,
+    ) -> Job:
+        """
+        Creates a job with transactional outbox pattern for exactly-once delivery.
+
+        This method implements the transactional outbox pattern by atomically
+        writing both the job record and the outbox message within the same
+        database transaction. This eliminates the split-brain problem where a
+        job could exist in the database but never be published to the queue.
+
+        The method is idempotent: if a job with the same job_key already exists,
+        it returns the existing job instead of creating a duplicate.
+
+        Args:
+            org_id: The UUID of the organization this job belongs to.
+            job_type: The type of job (e.g., "video_ingest", "mock_process").
+            job_key: The deterministic server-side idempotency key (SHA256 hash).
+            task_name: The name of the Dramatiq actor to invoke.
+            payload: The JSONB payload containing message arguments.
+            requested_by: Optional metadata about the user or service.
+            priority: The job's priority (higher values processed first).
+
+        Returns:
+            The created (or existing) Job instance.
+        """
+        # Check if a job with this job_key already exists (idempotency check)
+        existing_job = self.get_job_by_job_key(job_key)
+        if existing_job:
+            return existing_job
+
+        # Create the job
+        job = Job(
+            id=uuid.uuid4(),
+            org_id=org_id,
+            type=job_type,
+            status=JobStatus.QUEUED,
+            job_key=job_key,
+            requested_by=requested_by,
+            priority=priority,
+        )
+        self.session.add(job)
+        self.session.flush()  # Get the job.id
+
+        # Log the initial event
+        self.log_job_event(
+            job_id=job.id,
+            prev_status=None,
+            next_status=JobStatus.QUEUED.value,
+        )
+
+        # Write to outbox in the same transaction
+        outbox_message = Outbox(
+            job_id=job.id,
+            task_name=task_name,
+            payload=payload,
+        )
+        self.session.add(outbox_message)
+
+        return job
+
+    def get_job_by_job_key(self, job_key: str) -> Job | None:
+        """
+        Retrieves a job by its deterministic job_key.
+
+        This is used for server-side idempotency checks to ensure that the same
+        logical job is not created multiple times.
+
+        Args:
+            job_key: The SHA256 hash representing the job's idempotency key.
+
+        Returns:
+            The Job instance if found, None otherwise.
+        """
+        stmt = select(Job).where(Job.job_key == job_key)
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def get_unsent_outbox_messages(self, limit: int = 100) -> Sequence[Outbox]:
+        """
+        Retrieves unsent outbox messages for the outbox dispatcher.
+
+        Uses FOR UPDATE SKIP LOCKED to allow concurrent dispatcher instances
+        to process different batches without blocking each other.
+
+        Args:
+            limit: Maximum number of messages to retrieve.
+
+        Returns:
+            A sequence of unsent Outbox records.
+        """
+        stmt = (
+            select(Outbox)
+            .where(Outbox.sent_at.is_(None))
+            .order_by(Outbox.created_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return self.session.execute(stmt).scalars().all()
+
+    def mark_outbox_sent(self, outbox_id: int) -> None:
+        """
+        Marks an outbox message as successfully sent.
+
+        Args:
+            outbox_id: The ID of the outbox record to mark as sent.
+        """
+        stmt = select(Outbox).where(Outbox.id == outbox_id)
+        outbox = self.session.execute(stmt).scalar_one_or_none()
+        if outbox:
+            outbox.sent_at = datetime.now(UTC)
+
+    def mark_outbox_failed(self, outbox_id: int, error: str) -> None:
+        """
+        Records a failed publish attempt for an outbox message.
+
+        Args:
+            outbox_id: The ID of the outbox record.
+            error: The error message from the failed publish attempt.
+        """
+        stmt = select(Outbox).where(Outbox.id == outbox_id)
+        outbox = self.session.execute(stmt).scalar_one_or_none()
+        if outbox:
+            outbox.fail_count += 1
+            outbox.last_error = error[:2048]  # Truncate to column length
 
     def get_job_by_id(self, job_id: uuid.UUID) -> Job | None:
         """Retrieves a single job by its primary key."""
