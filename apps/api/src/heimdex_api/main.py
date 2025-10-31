@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse, Response
 from . import SERVICE_NAME, __version__
 from .jobs import router as jobs_router
 from .logger import log_event
+from .vectors import router as vectors_router
 
 # --- Global Service Metadata ---
 _ENV = os.getenv("HEIMDEX_ENV", "local")
@@ -43,6 +44,7 @@ app = FastAPI(
 # Include the router from the `jobs` module. This is a key part of FastAPI's
 # modular design, allowing us to organize endpoints into different files.
 app.include_router(jobs_router)
+app.include_router(vectors_router)
 
 
 @app.on_event("startup")

@@ -20,17 +20,21 @@ Architectural Role:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 import uuid
 from datetime import UTC, datetime
 
 import dramatiq
+import numpy as np
 from dramatiq.brokers.redis import RedisBroker
 
+from heimdex_common.config import get_config
 from heimdex_common.db import get_db
 from heimdex_common.models import JobStatus
 from heimdex_common.repositories import JobRepository
+from heimdex_common.vector import ensure_collection, point_id_for, upsert_point
 
 from .logger import log_event
 
@@ -220,5 +224,153 @@ def process_mock(job_id: str, fail_at_stage: str | None = None) -> None:
         # update the job's status to FAILED. Then, we re-raise the exception
         # to let Dramatiq handle the retry logic.
         log_event("ERROR", "job_processing_failed", job_id=job_id, error=str(e))
+        _update_job_status(job_id, status=JobStatus.FAILED, error=str(e), stage="error")
+        raise
+
+
+@dramatiq.actor(
+    actor_name="mock_embedding",
+    max_retries=3,
+    min_backoff=1000,
+    max_backoff=60000,
+)
+def mock_embedding(job_id: str, org_id: str, asset_id: str, segment_id: str) -> None:
+    """
+    A Dramatiq actor that generates deterministic mock embeddings and stores them in Qdrant.
+
+    This actor demonstrates the complete "Hello Write" flow for vector database
+    integration. It generates a reproducible mock vector based on the input parameters,
+    creates a deterministic point ID, and upserts the vector to Qdrant with proper
+    tenant isolation.
+
+    Key Features:
+    - **Idempotency**: Uses deterministic point IDs and Qdrant's native upsert behavior
+      to ensure that processing the same message multiple times produces the same result.
+    - **Deterministic Vectors**: Uses numpy's random number generator seeded with a
+      hash of the input parameters to generate consistent mock vectors for testing.
+    - **Tenant Isolation**: All vectors are tagged with org_id for multi-tenant filtering.
+    - **Collection Auto-Creation**: Ensures the collection exists before upserting.
+
+    Args:
+        job_id: The UUID of the job being processed.
+        org_id: The organization/tenant ID for multi-tenant isolation.
+        asset_id: The unique identifier of the asset being embedded.
+        segment_id: The identifier for a segment within the asset (e.g., chunk index).
+
+    Raises:
+        Exception: On unexpected errors, which will trigger Dramatiq's retry mechanism.
+    """
+    log_event(
+        "INFO",
+        "mock_embedding_started",
+        job_id=job_id,
+        org_id=org_id,
+        asset_id=asset_id,
+        segment_id=segment_id,
+    )
+
+    # CRITICAL IDEMPOTENCY CHECK: Verify the job is not already in a terminal state
+    with get_db() as session:
+        repo = JobRepository(session)
+        job = repo.get_job_by_id(uuid.UUID(job_id))
+
+        if not job:
+            log_event("ERROR", "job_not_found", job_id=job_id)
+            return
+
+        terminal_states = {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+            JobStatus.DEAD_LETTER,
+        }
+        if job.status in terminal_states:
+            log_event(
+                "INFO",
+                "job_already_terminal",
+                job_id=job_id,
+                status=job.status.value,
+                message="Idempotent no-op: job already in terminal state",
+            )
+            return
+
+    try:
+        _update_job_status(job_id, status=JobStatus.RUNNING, progress=0, stage="initializing")
+
+        # Get configuration
+        config = get_config()
+        vector_size = config.vector_size
+        collection_name = "embeddings"
+
+        # Ensure the Qdrant collection exists (idempotent)
+        log_event("INFO", "ensuring_collection", job_id=job_id, collection=collection_name)
+        _update_job_status(job_id, stage="ensuring_collection", progress=20)
+        ensure_collection(name=collection_name, vector_size=vector_size, distance="Cosine")
+
+        # Generate deterministic mock vector
+        # Use SHA256 hash of inputs to seed numpy's RNG for reproducibility
+        log_event("INFO", "generating_mock_vector", job_id=job_id)
+        _update_job_status(job_id, stage="generating_vector", progress=40)
+
+        seed_string = f"{org_id}:{asset_id}:{segment_id}:mock:v1"
+        seed_hash = hashlib.sha256(seed_string.encode("utf-8")).digest()
+        seed = int.from_bytes(seed_hash[:4], byteorder="big")  # Use first 4 bytes as seed
+
+        rng = np.random.default_rng(seed)
+        vector = rng.random(vector_size).astype(np.float32).tolist()
+
+        # Generate deterministic point ID
+        point_id = point_id_for(
+            org_id=org_id,
+            asset_id=asset_id,
+            segment_id=segment_id,
+            model="mock",
+            model_ver="v1",
+        )
+
+        log_event(
+            "INFO",
+            "upserting_vector",
+            job_id=job_id,
+            point_id=point_id,
+            vector_size=len(vector),
+        )
+        _update_job_status(job_id, stage="upserting_vector", progress=60)
+
+        # Upsert to Qdrant (idempotent operation)
+        payload = {
+            "org_id": org_id,
+            "asset_id": asset_id,
+            "segment_id": segment_id,
+            "model": "mock",
+            "model_ver": "v1",
+            "text": f"Mock embedding for asset {asset_id}, segment {segment_id}",
+        }
+
+        upsert_point(
+            collection_name=collection_name,
+            point_id=point_id,
+            vector=vector,
+            payload=payload,
+        )
+
+        # Mark job as completed successfully
+        result = {
+            "point_id": point_id,
+            "collection": collection_name,
+            "vector_size": vector_size,
+            "org_id": org_id,
+            "asset_id": asset_id,
+            "segment_id": segment_id,
+            "completed_at": datetime.now(UTC).isoformat(),
+        }
+
+        _update_job_status(
+            job_id, status=JobStatus.SUCCEEDED, progress=100, result=result, stage="completed"
+        )
+        log_event("INFO", "mock_embedding_succeeded", job_id=job_id, point_id=point_id)
+
+    except Exception as e:
+        log_event("ERROR", "mock_embedding_failed", job_id=job_id, error=str(e))
         _update_job_status(job_id, status=JobStatus.FAILED, error=str(e), stage="error")
         raise

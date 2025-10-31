@@ -112,6 +112,14 @@ class HeimdexConfig(BaseSettings):
         alias="QDRANT_URL",
         description="The HTTP API endpoint for the Qdrant vector database.",
     )
+    vector_size: int = Field(
+        default=384,
+        alias="VECTOR_SIZE",
+        description=(
+            "The dimensionality of vector embeddings. Must match the embedding model. "
+            "Common values: 384 (MiniLM), 768 (BERT-base), 1536 (OpenAI ada-002)."
+        ),
+    )
 
     # --- GCS (Google Cloud Storage) / MinIO Connection ---
     gcs_endpoint: str = Field(
