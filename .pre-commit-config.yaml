@@ -1,21 +1,32 @@
+# Heimdex Pre-commit Hooks Configuration
+# Run with: pre-commit run --all-files
+# Update with: pre-commit autoupdate
+
 default_language_version:
   python: python3.11
 
 repos:
+  # Python code quality and formatting
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.5.7
+    rev: v0.6.9
     hooks:
       - id: ruff
+        name: ruff (lint)
         args: [--fix]
+        types_or: [python, pyi]
       - id: ruff-format
+        name: ruff (format)
+        types_or: [python, pyi]
 
   - repo: https://github.com/psf/black
-    rev: 24.8.0
+    rev: 24.10.0
     hooks:
       - id: black
+        language_version: python3.11
 
+  # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
+    rev: v1.13.0
     hooks:
       - id: mypy
         additional_dependencies:
@@ -26,35 +37,120 @@ repos:
           - redis>=5.0.0,<6.0.0
           - sqlalchemy>=2.0.0,<3.0.0
           - types-requests>=2.32.0,<3.0.0
-        files: ^(apps|packages)/
-        exclude: ^packages/common/alembic/
+        args: [--ignore-missing-imports, --no-warn-unused-ignores]
+        exclude: ^(tests/|docs/|scripts/|packages/common/alembic/)
 
+  # Security scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets (scan for secrets)
+        args: [--baseline, .secrets.baseline]
+        exclude: |
+          (?x)^(
+            package-lock\.json|
+            \.secrets\.baseline|
+            \.env\.example|
+            packages/common/alembic/versions/.*\.py|
+            packages/common/alembic\.ini|
+            packages/common/tests/test_auth\.py|
+            supabase/migrations/.*\.sql|
+            docs/.*\.md|
+            infra/terraform/.*\.(tf|tfvars\.example)|
+            \.github/workflows/.*\.yml
+          )$
+
+  # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: v5.0.0
     hooks:
       - id: end-of-file-fixer
+        name: fix end of files
+        exclude: (\.secrets\.baseline)$
       - id: trailing-whitespace
+        name: trim trailing whitespace
+        exclude: (\.secrets\.baseline)$
       - id: check-yaml
+        name: check yaml
+        args: [--unsafe]
       - id: check-json
+        name: check json
       - id: check-toml
+        name: check toml
       - id: debug-statements
+        name: debug statements (python)
       - id: check-added-large-files
+        name: check for added large files
+        args: [--maxkb=10240]
       - id: check-merge-conflict
+        name: check for merge conflicts
+      - id: check-case-conflict
+        name: check for case conflicts
+      - id: check-docstring-first
+        name: check docstring is first
+      - id: check-executables-have-shebangs
+        name: check executables have shebangs
+      - id: check-shebang-scripts-are-executable
+        name: check shebang scripts are executable
 
+  # YAML linting
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.35.1
     hooks:
       - id: yamllint
-        files: ^(deploy/|\.github/).*\.ya?ml$
         args:
-          - -d
-          - "{extends: relaxed, rules: {line-length: {max: 140}}}"
+          - --config-data
+          - |
+            extends: default
+            rules:
+              line-length:
+                max: 120
+                level: warning
+              document-start: disable
+              truthy:
+                check-keys: false
 
+  # Dockerfile linting
   - repo: https://github.com/hadolint/hadolint
     rev: v2.12.0
     hooks:
       - id: hadolint-docker
+        name: Lint Dockerfiles
+        args: [--ignore, DL3008, --ignore, DL3013]
+
+  # GitHub Actions workflow linting
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.4
+    hooks:
+      - id: actionlint
+        name: lint GitHub Actions workflows
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.42.0
+    hooks:
+      - id: markdownlint
+        name: lint markdown files
+        args: [--fix, --config, .markdownlint.json]
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck (shell scripts)
+        args: [-x]
+
+  # Terraform formatting
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.1
+    hooks:
+      - id: terraform_fmt
+        name: terraform format
         args:
-          - --ignore=DL3008
-          - --ignore=DL3013
-          - --ignore=DL3059
+          - --args=-recursive
+      - id: terraform_validate
+        name: terraform validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true

@@ -34,6 +34,7 @@ Heimdex uses **Dramatiq** with Redis as the message broker to handle long-runnin
 **Canonical schema** (managed by Alembic):
 
 **`job` table** (durable ledger):
+
 - `id` (UUID): Globally unique job identifier
 - `org_id` (UUID): Organization/tenant identifier (for RLS in Supabase)
 - `type` (VARCHAR): Job type discriminator (`mock_process`, `drive_ingest`, etc.)
@@ -49,6 +50,7 @@ Heimdex uses **Dramatiq** with Redis as the message broker to handle long-runnin
 - `ck_job__status_finished_at_consistency`: Enforces `finished_at` is present only for terminal states (`succeeded`, `failed`, `canceled`, `dead_letter`)
 
 **`job_event` table** (immutable audit log):
+
 - `id` (UUID): Unique event identifier
 - `job_id` (UUID): Foreign key to `job.id`
 - `ts` (TIMESTAMPTZ): Event occurrence timestamp
@@ -61,6 +63,7 @@ See `../migration/db-schema.md` for full schema reference including indexes and 
 ### Retry Strategy
 
 Configured in `@dramatiq.actor` decorator:
+
 - **max_retries**: 3 attempts
 - **min_backoff**: 1000ms (1 second)
 - **max_backoff**: 60000ms (1 minute)
@@ -72,11 +75,13 @@ After exhausting retries, jobs move to Redis dead-letter queue for manual inspec
 ### Health vs. Readiness
 
 **`/healthz`**: Basic liveness check (process running, responding)
+
 - Returns static metadata: service name, version, environment, start time
 - Always returns HTTP 200 if process is alive
 - No dependency checks (fast, non-blocking)
 
 **`/readyz`**: Profile-aware readiness check with dependency probes
+
 - Probes **only enabled dependencies** (configured via `ENABLE_*` flags)
 - Disabled dependencies are skipped and don't affect readiness
 - Returns HTTP 200 if all enabled deps are healthy, HTTP 503 otherwise
@@ -86,12 +91,14 @@ After exhausting retries, jobs move to Redis dead-letter queue for manual inspec
 ### Profile-Aware Behavior
 
 **Current Compose Environment** (default flags):
+
 - **Enabled**: PostgreSQL, Redis → affect readiness
 - **Disabled**: Qdrant, GCS → skipped (not yet deployed)
 
 When you add Qdrant to docker-compose (micro-step 0.8), set `ENABLE_QDRANT=true` to include it in readiness checks.
 
 **Why Profile-Aware?**
+
 - Prevents false negatives (no "503" errors for services that don't exist yet)
 - Clean switch pattern: add service → flip flag → redeploy
 - No code changes needed when adding dependencies
@@ -99,11 +106,13 @@ When you add Qdrant to docker-compose (micro-step 0.8), set `ENABLE_QDRANT=true`
 ### Probe Semantics
 
 Each enabled probe:
+
 1. Performs a shallow health check (e.g., `SELECT 1` for PostgreSQL, `PING` for Redis)
 2. Enforces a tight per-attempt timeout (default: 300ms)
 3. Retries with jittered exponential backoff (default: 2 retries, 100-200ms backoff)
 4. Caches successful results (10s) and failed results (30s cooldown) to prevent probe storms
 5. Returns uniform structure:
+
    ```
    {
      enabled: bool,
@@ -116,6 +125,7 @@ Each enabled probe:
    ```
 
 **Failure Modes**:
+
 - **Connection refused**: Dependency not reachable (wrong hostname, service down)
 - **Timeout**: Dependency slow/overloaded (probe timeout exceeded)
 - **Auth error**: Credentials invalid (check env vars)
@@ -124,6 +134,7 @@ Each enabled probe:
 ### Readiness Response Examples
 
 **Minimal Profile** (current: PG + Redis only):
+
 ```json
 {
   "service": "api",
@@ -167,9 +178,11 @@ Each enabled probe:
   }
 }
 ```
+
 → Returns **HTTP 200 OK** (only PG and Redis checked)
 
 **Full Profile** (future: all deps enabled):
+
 ```json
 {
   "service": "api",
@@ -187,6 +200,7 @@ Each enabled probe:
 ```
 
 **Failure Example** (Redis down):
+
 ```json
 {
   "service": "api",
@@ -209,6 +223,7 @@ Each enabled probe:
   }
 }
 ```
+
 → Returns **HTTP 503 Service Unavailable**
 
 ### Probe Tunables
@@ -238,12 +253,14 @@ Each enabled probe:
 Heimdex uses JWT tokens for authentication with two modes:
 
 **Dev Mode** (local development):
+
 - Provider: `AUTH_PROVIDER=dev`
 - Algorithm: HS256 (symmetric)
 - Secret: Configured via `DEV_JWT_SECRET`
 - **Security**: Automatically disabled when `HEIMDEX_ENV=prod`
 
 **Supabase Mode** (production):
+
 - Provider: `AUTH_PROVIDER=supabase`
 - Algorithm: RS256 (asymmetric)
 - Verification: Public keys from JWKS endpoint
@@ -264,6 +281,7 @@ class RequestContext:
 ```
 
 **Usage in routes**:
+
 ```python
 from heimdex_common.auth import RequestContext, verify_jwt
 
@@ -279,11 +297,13 @@ async def create_job(
 ### Tenant Isolation
 
 **Enforcement Strategy**:
+
 1. **Creation**: Resources created with authenticated `org_id`
 2. **Retrieval**: Cross-tenant access returns HTTP 403
 3. **Queries**: Database queries filtered by `org_id`
 
 **Example - Job Retrieval**:
+
 ```python
 job = repo.get_job_by_id(job_id)
 

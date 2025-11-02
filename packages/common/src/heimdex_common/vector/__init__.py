@@ -15,6 +15,6 @@ from heimdex_common.vector.qdrant_repo import (
 __all__ = [
     "ensure_collection",
     "point_id_for",
-    "upsert_point",
     "search",
+    "upsert_point",
 ]

@@ -7,6 +7,7 @@
 ## Executive Summary
 
 This document tracks the complete migration from raw psycopg2 database connections to SQLAlchemy ORM. The migration involves:
+
 - **3 files** with active psycopg2 database operations
 - **1 file** with health probe using psycopg2 (will remain for lightweight probing)
 - **2 SQLAlchemy models** already defined (Job, JobEvent)
@@ -15,6 +16,7 @@ This document tracks the complete migration from raw psycopg2 database connectio
 ## Critical Finding: Infrastructure Already Exists! 🎉
 
 **Good News**: The SQLAlchemy infrastructure is **already set up**:
+
 - ✅ SQLAlchemy models defined in `packages/common/src/heimdex_common/models.py`
 - ✅ Database session management in `packages/common/src/heimdex_common/db.py`
 - ✅ Alembic migrations configured in `packages/common/alembic/`
@@ -25,44 +27,55 @@ This document tracks the complete migration from raw psycopg2 database connectio
 ## Files Requiring Migration
 
 ### 1. apps/api/src/heimdex_api/jobs.py ⚠️ HIGH PRIORITY
+
 **Status**: ❌ Not migrated
 **Database Operations**:
+
 - Line 97-104: INSERT job (psycopg2, raw SQL, old `jobs` table)
 - Line 137-146: SELECT job by ID (psycopg2, RealDictCursor, old `jobs` table)
 
 **Migration Complexity**: MEDIUM
+
 - 2 endpoints to migrate
 - Direct queries → Repository pattern
 - Uses old `jobs` table → needs to use new `job` table
 - Returns Pydantic models (easy to adapt)
 
 **Old Schema Mismatch**:
+
 - Old: `(id, status, stage, progress, created_at, updated_at)`
 - New: Adds `org_id, type, attempt, priority, idempotency_key, requested_by, started_at, finished_at, last_error_code, last_error_message`
 - **Action Required**: Update INSERT to include required fields (`org_id`, `type`)
 
 ### 2. apps/worker/src/heimdex_worker/tasks.py ⚠️ HIGH PRIORITY
+
 **Status**: ❌ Not migrated
 **Database Operations**:
+
 - Line 52-78: `_update_job_status()` function - Dynamic UPDATE (psycopg2, raw SQL, old `jobs` table)
 
 **Migration Complexity**: MEDIUM
+
 - 1 internal function called by Dramatiq actor
 - Dynamic SQL construction → SQLAlchemy update patterns
 - Uses old `jobs` table → needs to use new `job` table
 - Uses `result = %s::jsonb` → needs JSONB handling
 
 **Current Behavior**:
+
 - Updates: status, stage, progress, result (JSONB), error
 - Always updates `updated_at`
 - Uses string formatting for dynamic SET clause (safe, uses parameterization)
 
 ### 3. packages/common/src/heimdex_common/probes.py ✅ KEEP AS-IS
+
 **Status**: ✅ Intentional psycopg2 usage
 **Database Operations**:
+
 - Line 44-62: `probe_postgres()` - Health check with SELECT 1
 
 **Migration Decision**: **NO MIGRATION NEEDED**
+
 - **Rationale**: Lightweight health probes should not use ORM overhead
 - **Best Practice**: Direct psycopg2 connection for liveness/readiness checks
 - **Action**: Keep as-is, document as intentional exception
@@ -72,7 +85,9 @@ This document tracks the complete migration from raw psycopg2 database connectio
 ### Existing Tables (Currently Used by App)
 
 #### Table: `jobs` (plural, old schema)
+
 **Columns**:
+
 - `id` UUID PRIMARY KEY
 - `status` VARCHAR
 - `stage` VARCHAR (nullable)
@@ -83,16 +98,19 @@ This document tracks the complete migration from raw psycopg2 database connectio
 - `updated_at` TIMESTAMPTZ
 
 **Indexes**:
+
 - `idx_jobs_status` on `status`
 - `idx_jobs_created_at` on `created_at`
 
 ### New Tables (Defined but Not Yet Used)
 
 #### Table: `job` (singular, new schema)
+
 **Defined in**: `packages/common/src/heimdex_common/models.py:29-170`
 **Migration**: `packages/common/alembic/versions/001_job_ledger_init.py`
 
 **Columns** (see db-schema.md for full details):
+
 - `id` UUID PRIMARY KEY
 - `org_id` UUID NOT NULL (NEW - for multi-tenancy)
 - `type` VARCHAR(100) NOT NULL (NEW - job type discriminator)
@@ -109,23 +127,28 @@ This document tracks the complete migration from raw psycopg2 database connectio
 - `last_error_message` TEXT (NEW - replaces old `error`)
 
 **Relationships**:
+
 - One-to-many with `job_event` table
 
 **Constraints**:
+
 - Unique: `(org_id, idempotency_key)` WHERE idempotency_key IS NOT NULL
 - Check: status IN ('queued', 'running', 'succeeded', 'failed', 'canceled', 'dead_letter')
 
 **Indexes**:
+
 - `idx_job_org_status` on `(org_id, status, created_at)`
 - `idx_job_type_status` on `(type, status)`
 
 #### Table: `job_event` (new, audit log)
+
 **Defined in**: `packages/common/src/heimdex_common/models.py:172-237`
 **Migration**: `packages/common/alembic/versions/001_job_ledger_init.py`
 
 **Purpose**: Immutable audit log for job state transitions
 
 **Columns**:
+
 - `id` UUID PRIMARY KEY
 - `job_id` UUID FOREIGN KEY → job.id (CASCADE DELETE)
 - `ts` TIMESTAMPTZ NOT NULL
@@ -134,12 +157,14 @@ This document tracks the complete migration from raw psycopg2 database connectio
 - `detail_json` JSONB (nullable, stores stage/progress/error details)
 
 **Indexes**:
+
 - `idx_job_event_job_ts` on `(job_id, ts)`
 - `idx_job_event_ts` on `ts`
 
 ## Schema Mapping: Old → New
 
 ### Field Mapping
+
 | Old Field | New Field(s) | Notes |
 |-----------|--------------|-------|
 | `id` | `id` | No change (UUID) |
@@ -160,6 +185,7 @@ This document tracks the complete migration from raw psycopg2 database connectio
 | ❌ N/A | `finished_at` | **NEW**: NULL for now (set when terminal state) |
 
 ### Status Value Mapping
+
 | Old Status | New Status |
 |------------|------------|
 | `pending` | `queued` |
@@ -170,15 +196,18 @@ This document tracks the complete migration from raw psycopg2 database connectio
 ## Migration Phases (UPDATED based on existing infrastructure)
 
 ### ✅ Phase 1: Discovery and Audit (COMPLETE)
+
 - ✅ Identify all psycopg2 usage
 - ✅ Catalog database schema (old vs. new)
 - ✅ Create migration inventory (this document)
 - ✅ Verify SQLAlchemy infrastructure exists
 
 ### Phase 2: Repository Layer Implementation (NEW)
+
 **Why needed**: Application code should not use models directly
 
 **Tasks**:
+
 1. Create `packages/common/src/heimdex_common/repositories/` directory
 2. Create `job_repository.py` with JobRepository class
 3. Implement methods:
@@ -189,9 +218,11 @@ This document tracks the complete migration from raw psycopg2 database connectio
 4. Export repository in `__init__.py`
 
 ### Phase 3: Migrate API Endpoints
+
 **File**: `apps/api/src/heimdex_api/jobs.py`
 
 **Steps**:
+
 1. Remove psycopg2 imports
 2. Add SQLAlchemy imports (Session, models, repositories)
 3. Update `create_job()`:
@@ -206,9 +237,11 @@ This document tracks the complete migration from raw psycopg2 database connectio
    - Update status mapping in response
 
 ### Phase 4: Migrate Worker Tasks
+
 **File**: `apps/worker/src/heimdex_worker/tasks.py`
 
 **Steps**:
+
 1. Remove psycopg2 imports
 2. Add SQLAlchemy imports
 3. Refactor `_update_job_status()`:
@@ -224,14 +257,18 @@ This document tracks the complete migration from raw psycopg2 database connectio
    - Set `finished_at` when entering terminal state
 
 ### Phase 5: Deploy Schema Migration
+
 **Tasks**:
+
 1. Review Alembic migration: `packages/common/alembic/versions/001_job_ledger_init.py`
 2. Run migration: `alembic upgrade head`
 3. Verify new tables created: `job`, `job_event`
 4. Verify old table dropped: `jobs`
 
 ### Phase 6: Testing and Validation
+
 **Tasks**:
+
 1. Create test suite:
    - Test job creation with new schema
    - Test job status queries
@@ -248,7 +285,9 @@ This document tracks the complete migration from raw psycopg2 database connectio
    - Error scenarios
 
 ### Phase 7: Cleanup and Documentation
+
 **Tasks**:
+
 1. Remove all psycopg2 imports (except probes.py)
 2. Update environment documentation
 3. Generate MIGRATION_REPORT.md
@@ -258,6 +297,7 @@ This document tracks the complete migration from raw psycopg2 database connectio
 ## Dependencies and Configuration
 
 ### Current Dependencies (packages/common/pyproject.toml)
+
 ```toml
 psycopg2-binary>=2.9.9,<3.0.0  # Keep for probes
 sqlalchemy>=2.0.0,<3.0.0        # Already present ✅
@@ -265,9 +305,11 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 ```
 
 ### Database Connection Configuration
+
 **File**: `packages/common/src/heimdex_common/db.py`
 
 **Current State**: ✅ Fully implemented with:
+
 - `get_engine()` - SQLAlchemy engine with connection pooling
 - `get_session_factory()` - Session factory
 - `get_db()` - Context manager for transactional sessions
@@ -275,6 +317,7 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 - Pool pre-ping: enabled
 
 **Connection String**:
+
 - Format: `postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}`
 - Source: Environment variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE)
 - Managed by: `heimdex_common.config.HeimdexConfig`
@@ -282,31 +325,38 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 ## Migration Risks and Mitigations
 
 ### Risk 1: Schema Mismatch in Production
+
 **Issue**: Old `jobs` table exists, new `job` table will be created
 **Mitigation**: Alembic migration drops old table first (line 33 in 001_job_ledger_init.py)
 **Status**: ✅ Handled
 
 ### Risk 2: Missing Required Fields (org_id, type)
+
 **Issue**: New schema requires fields not in old INSERT statements
 **Mitigation**:
+
 - Use default `org_id = UUID('00000000-0000-0000-0000-000000000000')` for single-tenant
 - Hardcode `type = "mock_process"` for existing job type
 **Action**: Document these defaults in migration guide
 
 ### Risk 3: Status Value Changes
+
 **Issue**: "pending" → "queued", "processing" → "running", "completed" → "succeeded"
 **Mitigation**: Update all status strings in both API and Worker
 **Action**: Use constants to prevent typos
 
 ### Risk 4: Loss of stage/progress/result Data
+
 **Issue**: These fields removed from main `job` table
 **Mitigation**: Store in `job_event.detail_json` instead
 **Impact**: Queries for stage/progress require joining with job_event
 **Action**: Repository methods should handle this transparently
 
 ### Risk 5: Performance Regression
+
 **Issue**: ORM overhead vs. raw SQL
 **Mitigation**:
+
 - Use SQLAlchemy 2.0 style (faster)
 - Connection pooling already configured
 - Benchmark before/after
@@ -315,7 +365,9 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 ## Breaking Changes
 
 ### API Response Changes (Potential)
+
 **Current**: `GET /jobs/{job_id}` returns:
+
 ```json
 {
   "id": "...",
@@ -330,6 +382,7 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 ```
 
 **New**: Same structure, but:
+
 - `status`: Values change ("processing" → "running", etc.)
 - `stage`: Fetched from latest job_event.detail_json
 - `progress`: Fetched from latest job_event.detail_json
@@ -341,11 +394,13 @@ alembic>=1.13.0,<2.0.0          # Already present ✅
 ## Rollback Plan
 
 ### If Migration Fails
+
 1. Do NOT run `alembic upgrade head`
 2. Keep old `jobs` table
 3. Keep old psycopg2 code
 
 ### If Migration Succeeds but Issues Found
+
 1. Stop API and Worker services
 2. Run `alembic downgrade base` (drops new tables)
 3. Manually recreate old `jobs` table using old schema

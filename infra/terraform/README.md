@@ -15,11 +15,13 @@ This directory contains Infrastructure-as-Code for deploying Heimdex to Google C
 ### Local Development
 
 1. **Copy the example variables file:**
+
    ```bash
    cp terraform.tfvars.example terraform.tfvars
    ```
 
 2. **Edit `terraform.tfvars` with your values:**
+
    ```hcl
    project_id = "your-gcp-project-id"
    region     = "us-central1"
@@ -27,11 +29,13 @@ This directory contains Infrastructure-as-Code for deploying Heimdex to Google C
    ```
 
 3. **Initialize Terraform:**
+
    ```bash
    terraform init
    ```
 
 4. **Validate configuration:**
+
    ```bash
    terraform validate
    tflint
@@ -39,11 +43,13 @@ This directory contains Infrastructure-as-Code for deploying Heimdex to Google C
    ```
 
 5. **Plan changes:**
+
    ```bash
    terraform plan -out=tfplan
    ```
 
 6. **Apply (manual only):**
+
    ```bash
    terraform apply tfplan
    ```
@@ -67,6 +73,7 @@ The Terraform plan/apply jobs are **disabled by default** to avoid errors when G
    - **On Push to main**: `terraform plan` runs (manual apply required via environment approval)
 
 **Jobs that always run** (no credentials needed):
+
 - Terraform format check
 - Terraform validate
 - TFLint
@@ -124,16 +131,19 @@ tfsec .
 Currently uses **local backend** for simplicity. For production:
 
 1. Create a GCS bucket for state:
+
    ```bash
    gsutil mb -p your-project -l us-central1 gs://your-project-terraform-state
    ```
 
 2. Enable versioning:
+
    ```bash
    gsutil versioning set on gs://your-project-terraform-state
    ```
 
 3. Update `versions.tf`:
+
    ```hcl
    backend "gcs" {
      bucket = "your-project-terraform-state"
@@ -144,16 +154,21 @@ Currently uses **local backend** for simplicity. For production:
 ## Troubleshooting
 
 ### API not enabled
+
 ```
 Error: Error enabling service: Permission denied
 ```
+
 **Solution**: Enable required APIs manually or grant `roles/serviceusage.serviceUsageAdmin`
 
 ### Container not deployed
+
 The baseline creates Cloud Run services with placeholder images. Actual deployment happens via CI/CD after images are built.
 
 ### Terraform state locked
+
 ```
 Error: Error acquiring the state lock
 ```
+
 **Solution**: With local backend, delete `.terraform/terraform.tfstate.lock.info`

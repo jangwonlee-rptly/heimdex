@@ -95,7 +95,7 @@ def ensure_collection(
 
     if distance not in distance_map:
         raise ValueError(
-            f"Invalid distance metric: {distance}. " f"Valid options: {list(distance_map.keys())}"
+            f"Invalid distance metric: {distance}. Valid options: {list(distance_map.keys())}"
         )
 
     # Create the collection with the specified vector configuration

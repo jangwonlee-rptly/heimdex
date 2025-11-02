@@ -330,6 +330,5 @@ class Outbox(Base):
     def __repr__(self) -> str:
         status = "sent" if self.sent_at else "pending"
         return (
-            f"<Outbox(id={self.id}, job_id={self.job_id}, "
-            f"task={self.task_name}, status={status})>"
+            f"<Outbox(id={self.id}, job_id={self.job_id}, task={self.task_name}, status={status})>"
         )

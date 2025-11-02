@@ -11,6 +11,7 @@ Authorization: Bearer <jwt-token>
 ```
 
 The authentication middleware:
+
 1. Verifies the JWT signature and claims
 2. Extracts user identity (`user_id`) and organization scope (`org_id`)
 3. Injects a `RequestContext` into route handlers
@@ -23,12 +24,14 @@ The authentication middleware:
 **Purpose**: Simplified auth for local development and testing
 
 **Configuration**:
+
 ```bash
 AUTH_PROVIDER=dev
 DEV_JWT_SECRET=local-dev-secret
 ```
 
 **Token Format**: HS256-signed JWT
+
 ```json
 {
   "sub": "user-123",
@@ -40,6 +43,7 @@ DEV_JWT_SECRET=local-dev-secret
 ```
 
 **Creating Dev Tokens**:
+
 ```python
 from heimdex_common.auth import create_dev_token
 
@@ -58,6 +62,7 @@ token = create_dev_token(
   invalid org_id (like "org-123" instead of a proper UUID).
 
   Generate a fresh token:
+
   ```
   docker exec deploy-api-1 python3 -c "
   from heimdex_common.auth import create_dev_token
@@ -78,8 +83,6 @@ token = create_dev_token(
 
   Then copy the export TOKEN="..." line and run it in your terminal.
 
-
-
 ```bash
 TOKEN=$(python -c "
 from heimdex_common.auth import create_dev_token
@@ -97,6 +100,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 **Purpose**: Production-grade auth with Supabase
 
 **Configuration**:
+
 ```bash
 AUTH_PROVIDER=supabase
 SUPABASE_JWKS_URL=https://<project>.supabase.co/auth/v1/jwks
@@ -107,12 +111,14 @@ AUTH_ISSUER=https://<project>.supabase.co/
 **Token Format**: RS256-signed JWT from Supabase Auth
 
 **Required Claims**:
+
 - `sub`: User ID (from Supabase user)
 - `aud`: Must match `AUTH_AUDIENCE`
 - `iss`: Must match `AUTH_ISSUER`
 - `org_id`: Organization ID (see "Organization Claim" below)
 
 **Verification**:
+
 - Signature verified using Supabase JWKS (public keys)
 - Claims validated (aud, iss, exp)
 - No secrets stored in app code (JWKS fetched at runtime)
@@ -150,6 +156,7 @@ CREATE TRIGGER on_auth_user_created
 ```
 
 The `org_id` will then appear in JWT tokens as:
+
 ```json
 {
   "app_metadata": {
@@ -188,12 +195,14 @@ async def create_job(
 All data access is scoped by `org_id`:
 
 **Creating Resources**:
+
 ```python
 # Force org_id to authenticated user's organization
 job = repo.create_job(org_id=ctx.org_id, ...)
 ```
 
 **Reading Resources**:
+
 ```python
 job = repo.get_job_by_id(job_id)
 
@@ -209,12 +218,14 @@ if str(job.org_id) != ctx.org_id:
 ### Secrets Management
 
 **❌ Never commit secrets**:
+
 ```bash
 # DO NOT do this
 DEV_JWT_SECRET=super-secret-key  # ❌ Committed to git
 ```
 
 **✅ Use environment variables**:
+
 ```bash
 # Local development: .env file (git-ignored)
 DEV_JWT_SECRET=local-dev-secret
@@ -240,6 +251,7 @@ DEV_JWT_SECRET=$(gcloud secrets versions access latest --secret=dev-jwt-secret)
 ### 401 Unauthorized
 
 **Missing token**:
+
 ```json
 {
   "detail": "Not authenticated"
@@ -247,6 +259,7 @@ DEV_JWT_SECRET=$(gcloud secrets versions access latest --secret=dev-jwt-secret)
 ```
 
 **Expired token**:
+
 ```json
 {
   "detail": "Token has expired"
@@ -254,6 +267,7 @@ DEV_JWT_SECRET=$(gcloud secrets versions access latest --secret=dev-jwt-secret)
 ```
 
 **Invalid signature**:
+
 ```json
 {
   "detail": "Invalid token: Signature verification failed"
@@ -261,6 +275,7 @@ DEV_JWT_SECRET=$(gcloud secrets versions access latest --secret=dev-jwt-secret)
 ```
 
 **Missing required claim**:
+
 ```json
 {
   "detail": "Missing org_id claim in token (required for tenant isolation)"
@@ -270,6 +285,7 @@ DEV_JWT_SECRET=$(gcloud secrets versions access latest --secret=dev-jwt-secret)
 ### 403 Forbidden
 
 **Cross-tenant access**:
+
 ```json
 {
   "detail": "Access denied: job belongs to a different organization"
@@ -331,6 +347,7 @@ curl -H "Authorization: Bearer $TEST_TOKEN" \
 **Cause**: Missing Supabase configuration when `AUTH_PROVIDER=supabase`
 
 **Solution**: Set all required Supabase env vars:
+
 ```bash
 SUPABASE_JWKS_URL=https://<project>.supabase.co/auth/v1/jwks
 AUTH_AUDIENCE=heimdex
@@ -346,15 +363,18 @@ AUTH_ISSUER=https://<project>.supabase.co/
 ## Migration Path
 
 ### Phase 1: Local Development (Current)
+
 - Use dev mode with hardcoded secrets
 - Manual token generation for testing
 
 ### Phase 2: Supabase Integration (Next)
+
 - Configure Supabase project
 - Set up org_id metadata
 - Switch production to Supabase mode
 
 ### Phase 3: Advanced Features (Future)
+
 - Role-based access control (RBAC)
 - API key auth for service-to-service calls
 - OAuth2 for third-party integrations

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 End-to-End Test for Qdrant Integration.
 
@@ -29,7 +28,7 @@ ASSET_ID = "final-test-doc"
 SEGMENT_ID = "final-chunk-0"
 
 
-def main():
+def main() -> None:
     print("=" * 80)
     print("Qdrant Integration End-to-End Test")
     print("=" * 80)

@@ -311,10 +311,12 @@ class HeimdexConfig(BaseSettings):
                 "postgresql+psycopg2", which is suitable for psycopg version 3.
 
         Returns:
-            str: The complete database connection URL, e.g.,
-                "postgresql+psycopg2://user:password@host:port/dbname".
+            str: The complete database connection URL
         """
-        return f"{driver}://{self.pguser}:{self.pgpassword}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        return (
+            f"{driver}://{self.pguser}:{self.pgpassword}"
+            f"@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        )  # pragma: allowlist secret
 
     def get_postgres_dsn(self) -> str:
         """
@@ -324,9 +326,13 @@ class HeimdexConfig(BaseSettings):
         that do not use the SQLAlchemy URL format.
 
         Returns:
-            str: The PostgreSQL DSN, e.g., "postgresql://user:password@host:port/dbname".
+            str: The PostgreSQL DSN
         """
-        return f"postgresql://{self.pguser}:{self.pgpassword}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        dsn = (
+            f"postgresql://{self.pguser}:{self.pgpassword}"
+            f"@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        )
+        return dsn  # pragma: allowlist secret
 
     def log_summary(self, redact_secrets: bool = True) -> dict[str, str | int]:
         """

@@ -30,6 +30,7 @@
 **Issue**: Existing table uses plural name `jobs`, but canonical naming convention prefers singular `job`.
 
 **Decision**: **SUPERSEDE** - Create new canonical tables with the following rationale:
+
 - New tables: `job` (singular) and `job_event` (new)
 - The existing `jobs` table schema is incomplete for the durable ledger requirements
 - Missing fields: org_id, type, attempt, priority, idempotency_key, requested_by, started_at, finished_at, last_error_code, last_error_message
@@ -40,6 +41,7 @@
   - Update all code references from `jobs` to `job`
 
 **Conflicts Identified**:
+
 - Column naming: existing `error` (TEXT) vs. new `last_error_code` + `last_error_message` split
 - Missing state machine audit trail (no event log)
 - No org_id for multi-tenancy (RLS future requirement)
@@ -118,6 +120,7 @@ The durable ledger for all asynchronous jobs in the system.
 ```
 
 **States**:
+
 - `queued`: Job created, waiting for worker pickup
 - `running`: Worker actively processing
 - `succeeded`: Completed successfully (terminal)
@@ -126,6 +129,7 @@ The durable ledger for all asynchronous jobs in the system.
 - `dead_letter`: Max retries exceeded (terminal)
 
 **Transition Rules**:
+
 - Retries: `failed` → `queued` (if attempt < max_retries)
 - Max retries: `failed` → `dead_letter` (if attempt >= max_retries)
 - Normal flow: `queued` → `running` → `succeeded`
@@ -175,11 +179,13 @@ Immutable audit log of all job state transitions.
 ## Migration Strategy
 
 ### Phase 1: Alembic Setup (this PR)
+
 1. Create `job` and `job_event` tables via Alembic migration
 2. Drop existing `jobs` table (CREATE TABLE IF NOT EXISTS prevents conflicts)
 3. Update all application code to use new schema
 
 ### Phase 2: Future Extensions (out of scope)
+
 - Add `asset` table for vector/metadata storage
 - Add `sidecar_ref` table for auxiliary files
 - Add RLS policies for org_id scoping (Supabase prod)

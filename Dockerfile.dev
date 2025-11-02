@@ -1,0 +1,42 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        build-essential \
+    && pip install --no-cache-dir uv \
+    && uv pip install --system \
+        ruff \
+        black \
+        mypy \
+        pytest \
+        pytest-asyncio \
+        pre-commit \
+        types-requests \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy entire project for dependency installation
+COPY packages/ /tmp/build/packages/
+COPY apps/ /tmp/build/apps/
+
+# Install project dependencies in editable mode
+# This installs package metadata and dependencies into /usr/local
+# The actual source code will be provided by volume mount at runtime
+WORKDIR /tmp/build
+RUN uv pip install --system -e "packages/common[test]" && \
+    uv pip install --system -e apps/api && \
+    uv pip install --system -e apps/worker
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash devuser
+
+# Set working directory
+WORKDIR /workspace
+
+# Switch to non-root user
+USER devuser
+
+# Default command
+CMD ["/bin/bash"]

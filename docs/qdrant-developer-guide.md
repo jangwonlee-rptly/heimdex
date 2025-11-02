@@ -15,6 +15,7 @@ docker compose up -d
 ```
 
 Wait for services to be healthy (~10 seconds):
+
 ```bash
 curl http://localhost:8000/readyz | jq '.ready'
 # Should return: true
@@ -99,6 +100,7 @@ curl -X POST http://localhost:8000/vectors/mock \
 ```
 
 **Response**:
+
 ```json
 {
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -108,6 +110,7 @@ curl -X POST http://localhost:8000/vectors/mock \
 ```
 
 **Notes**:
+
 - Mock endpoint uses deterministic random vectors (not real embeddings)
 - Same asset_id + segment_id → same vector every time
 - Returns immediately; processing happens async
@@ -122,6 +125,7 @@ curl http://localhost:8000/jobs/$JOB_ID \
 ```
 
 **Response**:
+
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -144,6 +148,7 @@ curl http://localhost:8000/jobs/$JOB_ID \
 ```
 
 **Job Status Values**:
+
 - `pending`: Waiting to start
 - `processing`: Worker is processing
 - `completed`: Success
@@ -158,6 +163,7 @@ curl http://localhost:8000/readyz | jq
 ```
 
 **Response**:
+
 ```json
 {
   "service": "api",
@@ -392,18 +398,21 @@ curl -s http://localhost:8000/jobs/$JOB_ID \
 ### "Job stuck in pending"
 
 **Check**: Outbox dispatcher running?
+
 ```bash
 docker compose logs api | grep outbox_dispatcher
 # Should see: "outbox_dispatcher_started"
 ```
 
 **Check**: Worker running?
+
 ```bash
 docker compose ps worker
 # Should show: "Up" status
 ```
 
 **Check**: Outbox table
+
 ```bash
 docker compose exec pg psql -U heimdex -c "SELECT id, task_name, sent_at FROM outbox ORDER BY created_at DESC LIMIT 5;"
 ```
@@ -411,6 +420,7 @@ docker compose exec pg psql -U heimdex -c "SELECT id, task_name, sent_at FROM ou
 ### "Job failed with Qdrant error"
 
 **Check**: Qdrant service healthy?
+
 ```bash
 docker compose ps qdrant
 # Should show: "Up (healthy)"
@@ -420,11 +430,13 @@ curl http://localhost:6333/
 ```
 
 **Check**: Worker logs
+
 ```bash
 docker compose logs worker --tail=50 | grep ERROR
 ```
 
 Common errors:
+
 - `Connection refused`: Qdrant not running
 - `Collection not found`: Collection creation failed
 - `Dimensionality mismatch`: VECTOR_SIZE config wrong
@@ -432,12 +444,14 @@ Common errors:
 ### "Invalid JWT token"
 
 **Check**: Token not expired?
+
 ```bash
 # Dev tokens expire in 1 hour
 # Regenerate token
 ```
 
 **Check**: Correct org_id?
+
 ```bash
 # Token must have matching org_id
 ```
@@ -451,16 +465,19 @@ Common errors:
 ### Performance Issues
 
 **Check**: Worker CPU/memory
+
 ```bash
 docker stats worker
 ```
 
 **Check**: Qdrant resource usage
+
 ```bash
 docker stats qdrant
 ```
 
 **Optimize**:
+
 - Batch multiple embeddings in single job
 - Add GPU for faster inference (when using real models)
 - Increase worker concurrency
@@ -547,12 +564,14 @@ OUTBOX_DISPATCH_INTERVAL_MS=500
 ### 1. Always Use Job Polling
 
 ❌ **Don't** assume embedding is instant:
+
 ```python
 response = requests.post("/vectors/mock", ...)
 # Don't immediately assume it's done!
 ```
 
 ✅ **Do** poll job status:
+
 ```python
 response = requests.post("/vectors/mock", ...)
 job_id = response.json()["job_id"]
@@ -562,12 +581,14 @@ result = wait_for_job(job_id)  # Poll until complete
 ### 2. Handle Job Failures
 
 ❌ **Don't** ignore errors:
+
 ```python
 job = get_job(job_id)
 point_id = job["result"]["point_id"]  # Crashes if job failed!
 ```
 
 ✅ **Do** check status:
+
 ```python
 job = get_job(job_id)
 if job["status"] == "failed":
@@ -580,6 +601,7 @@ elif job["status"] == "completed":
 ### 3. Use Idempotency
 
 ✅ **Safe** to retry:
+
 ```python
 # Same parameters → same job_id
 response1 = requests.post("/vectors/mock", json={"asset_id": "doc-1", "segment_id": "chunk-0"})
@@ -591,12 +613,14 @@ assert response1.json()["job_id"] == response2.json()["job_id"]
 ### 4. Scope by org_id
 
 ❌ **Don't** search across all orgs:
+
 ```python
 # Missing org_id filter!
 results = search("embeddings", query_vector, limit=10)
 ```
 
 ✅ **Do** filter by org_id:
+
 ```python
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
@@ -610,6 +634,7 @@ results = search("embeddings", query_vector, limit=10, query_filter=query_filter
 ### 5. Monitor Resource Usage
 
 ✅ **Track** Qdrant metrics:
+
 ```bash
 # Collection size
 curl http://localhost:6333/collections/embeddings | jq '.result.points_count'
@@ -634,10 +659,10 @@ curl -w "Time: %{time_total}s\n" -X POST http://localhost:6333/collections/embed
 
 ## Quick Links
 
-- **Qdrant UI**: http://localhost:6333/dashboard
-- **API Docs**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/readyz
-- **Grafana** (if deployed): http://localhost:3000
+- **Qdrant UI**: <http://localhost:6333/dashboard>
+- **API Docs**: <http://localhost:8000/docs>
+- **Health Check**: <http://localhost:8000/readyz>
+- **Grafana** (if deployed): <http://localhost:3000>
 
 ---
 

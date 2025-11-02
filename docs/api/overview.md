@@ -19,6 +19,7 @@ http://localhost:8000
 Returns API health status and metadata.
 
 **Response:**
+
 ```json
 {
   "ok": true,
@@ -38,6 +39,7 @@ Returns API health status and metadata.
 Submits a new job for async processing.
 
 **Request Body:**
+
 ```json
 {
   "type": "mock_process",
@@ -46,10 +48,12 @@ Submits a new job for async processing.
 ```
 
 **Parameters:**
+
 - `type` (string): Job type. Currently only `"mock_process"` is supported.
 - `fail_at_stage` (string, optional): Stage name to trigger deterministic failure for testing. Options: `"extracting"`, `"analyzing"`, `"indexing"`. Default: `null`.
 
 **Response:**
+
 ```json
 {
   "job_id": "550e8400-e29b-41d4-a716-446655440000"
@@ -57,6 +61,7 @@ Submits a new job for async processing.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
@@ -72,9 +77,11 @@ curl -X POST http://localhost:8000/jobs \
 Retrieves the current status of a job.
 
 **Path Parameters:**
+
 - `job_id` (UUID): The job identifier returned from job creation
 
 **Response:**
+
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -89,12 +96,14 @@ Retrieves the current status of a job.
 ```
 
 **Status Values:**
+
 - `pending`: Job queued but not yet started
 - `processing`: Job actively running
 - `completed`: Job finished successfully
 - `failed`: Job failed after retries exhausted
 
 **Example:**
+
 ```bash
 curl http://localhost:8000/jobs/550e8400-e29b-41d4-a716-446655440000
 ```
@@ -104,21 +113,25 @@ curl http://localhost:8000/jobs/550e8400-e29b-41d4-a716-446655440000
 ## Testing Workflow
 
 ### 1. Submit a successful job
+
 ```bash
 make test-job
 ```
 
 ### 2. Check job progress
+
 ```bash
 make check-job
 ```
 
 Run this multiple times to watch the job progress through stages:
+
 - `extracting` (2 seconds)
 - `analyzing` (3 seconds)
 - `indexing` (1 second)
 
 ### 3. Test failure and retry behavior
+
 ```bash
 make test-job-fail
 # Wait ~10 seconds for retries
@@ -146,6 +159,7 @@ Total job duration: ~6 seconds (excluding queue time)
 ## Error Handling
 
 **404 Not Found:**
+
 ```json
 {
   "detail": "Job not found"
@@ -154,6 +168,7 @@ Total job duration: ~6 seconds (excluding queue time)
 
 **500 Internal Server Error:**
 Returned if database or Redis connection fails. Check service logs:
+
 ```bash
 make logs
 ```

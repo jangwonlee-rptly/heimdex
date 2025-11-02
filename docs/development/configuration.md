@@ -28,6 +28,7 @@ Heimdex services use a centralized configuration system powered by Pydantic Sett
 | `PGDATABASE` | string | `heimdex` | PostgreSQL database name |
 
 **Connection URL**: The config layer automatically constructs SQLAlchemy-compatible URLs:
+
 ```
 postgresql+psycopg2://heimdex:***@pg:5432/heimdex
 ```
@@ -103,17 +104,20 @@ Configuration for JWT-based authentication. See [auth.md](./auth.md) for detaile
 | `AUTH_ISSUER` | string | `None` | Expected JWT issuer claim (required when `AUTH_PROVIDER=supabase`) |
 
 **Security Rules**:
+
 - Dev mode (`AUTH_PROVIDER=dev`) is **automatically disabled** when `HEIMDEX_ENV=prod`
 - Supabase mode requires all three Supabase-related variables
 - Secrets are **never logged** (automatically redacted)
 
 **Example - Dev Mode** (local development):
+
 ```bash
 AUTH_PROVIDER=dev
 DEV_JWT_SECRET=local-dev-secret
 ```
 
 **Example - Supabase Mode** (production):
+
 ```bash
 AUTH_PROVIDER=supabase
 SUPABASE_JWKS_URL=https://abc123.supabase.co/auth/v1/jwks
@@ -189,6 +193,7 @@ In production (Supabase, Cloud Run, etc.), set environment variables via the pla
 1. **Load Configuration**: Pydantic Settings reads from environment variables
 2. **Validate**: Ensure required values are present and valid (e.g., port in 1-65535 range)
 3. **Log Summary**: Emit a single JSON log line with redacted config:
+
    ```json
    {
      "level": "INFO",
@@ -206,6 +211,7 @@ In production (Supabase, Cloud Run, etc.), set environment variables via the pla
      }
    }
    ```
+
 4. **Fail Fast**: If critical config is missing/invalid, service exits with clear error
 
 ### Configuration Access
@@ -261,12 +267,14 @@ This prevents external access to infrastructure services in development.
 **Why**: This ensures consistent dependency resolution and avoids uv virtual environment overhead in containers.
 
 **In Dockerfiles**:
+
 ```dockerfile
 RUN uv pip install --system -e packages/common -e apps/api
 CMD ["uvicorn", "heimdex_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 **NOT**:
+
 ```dockerfile
 CMD ["uv", "run", "uvicorn", "..."]  # ❌ Do not use in containers
 ```
@@ -286,6 +294,7 @@ Pydantic Settings performs validation at load time:
 ### Error Examples
 
 **Missing PGHOST**:
+
 ```
 pydantic.error_wrappers.ValidationError: 1 validation error for HeimdexConfig
 PGHOST
@@ -293,6 +302,7 @@ PGHOST
 ```
 
 **Invalid Port**:
+
 ```
 ValueError: Invalid PostgreSQL port: 99999 (must be 1-65535)
 ```
@@ -345,6 +355,7 @@ export $(cat .env.test | xargs) && pytest
 **Symptom**: Service uses default values despite setting env vars.
 
 **Solution**:
+
 1. Check `.env` file exists and is in the project root (for Docker Compose)
 2. Verify `env_file: .env` in `docker-compose.yml`
 3. Restart containers: `make down && make up`
@@ -354,8 +365,10 @@ export $(cat .env.test | xargs) && pytest
 **Symptom**: Can't see config summary in logs.
 
 **Solution**:
+
 1. Check `HEIMDEX_ENV` is set (logs may suppress in `prod`)
 2. Look for `starting` event in structured logs:
+
    ```bash
    docker logs heimdex-api-1 | grep starting | jq .
    ```
@@ -365,6 +378,7 @@ export $(cat .env.test | xargs) && pytest
 **Symptom**: `psycopg2.OperationalError: connection refused`.
 
 **Solution**:
+
 1. Ensure `PGHOST=pg` (not `localhost`) in Docker Compose
 2. Verify `pg` service is running: `docker ps | grep pg`
 3. Check readiness: `make readyz` (shows dependency probe status)
@@ -373,7 +387,7 @@ export $(cat .env.test | xargs) && pytest
 
 ## References
 
-- Pydantic Settings: https://docs.pydantic.dev/latest/concepts/pydantic_settings/
-- SQLAlchemy Database URLs: https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls
+- Pydantic Settings: <https://docs.pydantic.dev/latest/concepts/pydantic_settings/>
+- SQLAlchemy Database URLs: <https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls>
 - Config Implementation: `packages/common/src/heimdex_common/config.py`
 - Dependency Probes: `packages/common/src/heimdex_common/probes.py`

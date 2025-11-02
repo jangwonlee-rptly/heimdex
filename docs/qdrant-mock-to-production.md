@@ -76,11 +76,13 @@ for name, model_id in models.items():
 ```
 
 Run and compare:
+
 ```bash
 python scripts/evaluate_models.py
 ```
 
 **Decision Criteria**:
+
 - Vector size (smaller = faster search)
 - Similarity scores (higher for similar text = better)
 - Inference speed (measure on your hardware)
@@ -121,6 +123,7 @@ print(f"p99: {np.percentile(times, 99):.2f}ms")
 ```
 
 **Targets**:
+
 - p95 < 100ms (with GPU)
 - p95 < 500ms (with CPU)
 

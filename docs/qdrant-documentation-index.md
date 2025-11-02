@@ -12,6 +12,7 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 ### For Quick Start
 
 **→ [Qdrant Developer Guide](qdrant-developer-guide.md)** ⭐ **START HERE**
+
 - 5-minute quick start
 - Common tasks (create embeddings, search, debug)
 - Code examples (Python, TypeScript, cURL)
@@ -24,6 +25,7 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 ### For Understanding the System
 
 **→ [Microstep 0.8: Qdrant Integration](microstep-0.8-qdrant-integration.md)**
+
 - Complete implementation overview
 - Architecture & design decisions
 - What's mock vs production-ready
@@ -37,6 +39,7 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 ### For Planning Production
 
 **→ [Production Readiness Checklist](qdrant-production-todos.md)**
+
 - Priority-ordered task list (P0, P1, P2)
 - Effort estimates
 - Acceptance criteria
@@ -49,6 +52,7 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 ### For Migration to Production
 
 **→ [Migration Guide: Mock → Production](qdrant-mock-to-production.md)**
+
 - Step-by-step migration phases
 - Real embedding model integration
 - API endpoint implementation
@@ -61,7 +65,7 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 
 ## 🚀 Quick Navigation
 
-### I want to...
+### I want to
 
 | Goal | Document | Section |
 |------|----------|---------|
@@ -94,17 +98,20 @@ This directory contains comprehensive documentation for Heimdex's Qdrant vector 
 ### 🔴 What Needs Work (Production)
 
 **Priority 0 (Critical)**:
+
 - Real embedding model (SentenceTransformers, OpenAI, etc.)
 - Production endpoints (`/vectors/embed`, `/vectors/search`)
 - Text extraction & chunking pipeline
 
 **Priority 1 (Important)**:
+
 - Batch operations
 - Advanced search (hybrid, re-ranking)
 - Monitoring & observability
 - Performance optimization
 
 **Priority 2 (Nice to Have)**:
+
 - Multi-model support
 - Advanced Qdrant features (quantization, sparse vectors)
 - Developer tools (playground UI, visualizations)

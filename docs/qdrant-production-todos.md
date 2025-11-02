@@ -8,6 +8,7 @@
 ## Priority 0: Critical for Production Launch
 
 ### 1. Real Embedding Model Integration
+
 **Owner**: TBD
 **Status**: 🔴 Not Started
 **Deadline**: TBD
@@ -40,6 +41,7 @@
   - [ ] Measure latency: p50, p95, p99
 
 **Acceptance Criteria**:
+
 - ✅ Worker generates real embeddings from text input
 - ✅ Embeddings are identical for same text (reproducibility)
 - ✅ Latency < 100ms per embedding (with GPU) or < 500ms (CPU only)
@@ -49,6 +51,7 @@
 ---
 
 ### 2. Production API Endpoints
+
 **Owner**: TBD
 **Status**: 🔴 Not Started
 **Deadline**: TBD
@@ -83,6 +86,7 @@
   - [ ] Document rate limits
 
 **Acceptance Criteria**:
+
 - ✅ All CRUD operations functional
 - ✅ Semantic search returns relevant results
 - ✅ Rate limits prevent abuse
@@ -92,6 +96,7 @@
 ---
 
 ### 3. Text Extraction & Chunking Pipeline
+
 **Owner**: TBD
 **Status**: 🔴 Not Started
 **Deadline**: TBD
@@ -126,6 +131,7 @@
   - [ ] Test with non-English text
 
 **Acceptance Criteria**:
+
 - ✅ Extracts text from PDF, DOCX, TXT, HTML
 - ✅ Chunks respect token limits and semantic boundaries
 - ✅ Metadata includes source location (page, paragraph)
@@ -137,6 +143,7 @@
 ## Priority 1: Important for Production
 
 ### 4. Batch Operations
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -159,6 +166,7 @@
   - [ ] Verify all segments processed
 
 **Benefits**:
+
 - 5-10x faster for large documents
 - Better GPU utilization
 - Lower API overhead
@@ -166,6 +174,7 @@
 ---
 
 ### 5. Advanced Search Features
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -192,6 +201,7 @@
   - [ ] Add cursor-based pagination for deep pagination
 
 **Acceptance Criteria**:
+
 - ✅ Hybrid search outperforms vector-only (measured on test set)
 - ✅ MMR increases result diversity
 - ✅ Pagination works for 10k+ results
@@ -199,6 +209,7 @@
 ---
 
 ### 6. Monitoring & Observability
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -229,6 +240,7 @@
   - [ ] Track slow queries (>500ms)
 
 **Acceptance Criteria**:
+
 - ✅ Grafana dashboard shows key metrics
 - ✅ Alerts fire correctly (test with chaos engineering)
 - ✅ Traces visible in Jaeger/Zipkin
@@ -237,6 +249,7 @@
 ---
 
 ### 7. Performance Optimization
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -265,6 +278,7 @@
   - [ ] Evaluate storage compression
 
 **Acceptance Criteria**:
+
 - ✅ Search latency < 50ms (p95) for 1M vectors
 - ✅ Upsert throughput > 1000 vectors/second
 - ✅ Qdrant memory usage < 2x raw vector size
@@ -274,6 +288,7 @@
 ## Priority 2: Nice to Have
 
 ### 8. Multi-Model Support
+
 **Owner**: TBD
 **Status**: 🟢 Not Started
 **Deadline**: TBD
@@ -284,6 +299,7 @@
 - [ ] Create model recommendation system (suggest best model for use case)
 
 **Use Cases**:
+
 - Fast model for large-scale indexing (MiniLM)
 - Accurate model for high-value queries (MPNet, OpenAI)
 - Domain-specific models (legal, medical, code)
@@ -291,6 +307,7 @@
 ---
 
 ### 9. Advanced Qdrant Features
+
 **Owner**: TBD
 **Status**: 🟢 Not Started
 **Deadline**: TBD
@@ -312,6 +329,7 @@
 ---
 
 ### 10. Developer Experience
+
 **Owner**: TBD
 **Status**: 🟢 Not Started
 **Deadline**: TBD
@@ -341,6 +359,7 @@
 ## Testing & Validation
 
 ### 11. Comprehensive Testing
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -367,6 +386,7 @@
   - [ ] Disk full on Qdrant
 
 **Acceptance Criteria**:
+
 - ✅ >90% code coverage
 - ✅ All integration tests pass
 - ✅ Load tests meet SLA (p95 < 100ms)
@@ -375,6 +395,7 @@
 ---
 
 ### 12. Security Audit
+
 **Owner**: TBD
 **Status**: 🟡 Not Started
 **Deadline**: TBD
@@ -400,6 +421,7 @@
   - [ ] Add PII detection/scrubbing (if required)
 
 **Acceptance Criteria**:
+
 - ✅ No cross-tenant data leaks
 - ✅ All injection attacks blocked
 - ✅ Auth required and enforced on all endpoints
@@ -410,6 +432,7 @@
 ## Migration & Deployment
 
 ### 13. Production Deployment Checklist
+
 **Owner**: TBD
 **Status**: 🟢 Not Started
 **Deadline**: TBD
@@ -478,6 +501,7 @@ When selecting an embedding model, consider:
 5. **Vector Size**: Smaller = faster search, larger = better quality
 
 **Recommended Starting Point**: `sentence-transformers/all-MiniLM-L6-v2`
+
 - Vector size: 384
 - Quality: Good for general text
 - Speed: Fast (even on CPU)
@@ -486,16 +510,19 @@ When selecting an embedding model, consider:
 ### Qdrant Scaling Considerations
 
 **When to scale**:
+
 - **Vertical**: Add more RAM/CPU when search latency increases
 - **Horizontal**: Shard collection when vector count > 10M
 
 **Monitoring metrics**:
+
 - Vector count per collection
 - Search latency (p50, p95, p99)
 - Upsert throughput
 - Memory usage
 
 **Scaling strategy**:
+
 1. Start with single Qdrant instance
 2. Scale vertically to 16GB RAM, 4 CPU
 3. Add replicas for read scaling

@@ -80,7 +80,7 @@ services:
       dockerfile: apps/worker/Dockerfile
     env_file:
       - .env
-    command: ["dramatiq", "heimdex_worker.tasks", "--processes", "1", "--threads", "2"]
+    command: ["dramatiq", "heimdex_worker.tasks", "heimdex_worker.embeddings", "--processes", "1", "--threads", "2"]
     depends_on:
       pg:
         condition: service_healthy
@@ -93,6 +93,26 @@ services:
       retries: 3
     networks:
       - heimdex
+
+  # Development/CI container with all tools
+  dev:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    volumes:
+      - ..:/workspace:cached
+    working_dir: /workspace
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    networks:
+      - heimdex
+    depends_on:
+      - pg
+      - redis
+      - qdrant
 
 volumes:
   pg_data:

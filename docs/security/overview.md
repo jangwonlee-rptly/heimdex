@@ -17,11 +17,13 @@ Heimdex follows these core security principles:
 ### JWT-Based Authentication
 
 **Dev Mode** (local development only):
+
 - HS256 symmetric signing
 - Automatically disabled in production
 - Short-lived tokens (60 minutes default)
 
 **Supabase Mode** (production):
+
 - RS256 asymmetric signing
 - Public key verification via JWKS
 - No secrets stored in application
@@ -32,6 +34,7 @@ See [auth.md](./auth.md) for details.
 ### Tenant Isolation
 
 **Enforcement**: Every request is scoped to `org_id` from JWT
+
 - Jobs created with authenticated `org_id`
 - Cross-tenant access returns HTTP 403
 - Database queries filtered by `org_id`
@@ -49,6 +52,7 @@ USER appuser
 ```
 
 **Benefits**:
+
 - Limits blast radius of container compromise
 - Prevents privilege escalation attacks
 - Complies with PCI-DSS, SOC 2 requirements
@@ -56,6 +60,7 @@ USER appuser
 ### Read-Only Root Filesystem
 
 **Cloud Run Configuration**:
+
 ```hcl
 security_context {
   run_as_non_root = true
@@ -64,10 +69,12 @@ security_context {
 ```
 
 **Writable Directories**:
+
 - `/tmp` - Application temporary files
 - `/home/appuser` - User home directory (minimal usage)
 
 **Benefits**:
+
 - Prevents malware persistence
 - Blocks file-based attacks
 - Enables easy rollback (stateless containers)
@@ -75,11 +82,13 @@ security_context {
 ### Minimal Base Images
 
 **Base**: `python:3.11-slim`
+
 - Debian-based, security-patched
 - No unnecessary packages (curl only)
 - Regular updates via Dependabot
 
 **Attack Surface**:
+
 - ~100 MB image size
 - ~50 installed packages
 - No shells (bash, sh) available to appuser
@@ -87,6 +96,7 @@ security_context {
 ### Vulnerability Scanning
 
 **Automated Scanning**:
+
 ```yaml
 # .github/workflows/build.yml
 - uses: aquasecurity/trivy-action@master
@@ -96,6 +106,7 @@ security_context {
 ```
 
 **Scan Frequency**:
+
 - On every image build
 - Weekly scheduled scans
 - On dependency updates
@@ -105,12 +116,14 @@ security_context {
 ### Secret Manager Integration
 
 **Storage**:
+
 ```bash
 # Never in code or env files
 echo -n "secret-value" | gcloud secrets create secret-name --data-file=-
 ```
 
 **Access**:
+
 ```hcl
 env {
   name = "DEV_JWT_SECRET"
@@ -124,6 +137,7 @@ env {
 ```
 
 **Benefits**:
+
 - Automatic rotation support
 - Audit logs for access
 - Version history
@@ -132,6 +146,7 @@ env {
 ### Prohibited Practices
 
 **❌ Never Do**:
+
 ```bash
 # Hardcoded secrets
 JWT_SECRET = "my-secret-key"
@@ -147,6 +162,7 @@ logger.info(f"Using key: {secret}")
 ```
 
 **✅ Always Do**:
+
 ```bash
 # Environment variables (from Secret Manager)
 JWT_SECRET = os.getenv("DEV_JWT_SECRET")
@@ -163,16 +179,19 @@ config.log_summary(redact_secrets=True)
 ### Service Account Least Privilege
 
 **API Service Account**:
+
 - `roles/secretmanager.secretAccessor` (specific secrets only)
 - `roles/cloudsql.client` (if using Cloud SQL)
 - **No**: Broad roles like `roles/editor`
 
 **Worker Service Account**:
+
 - `roles/secretmanager.secretAccessor` (specific secrets only)
 - `roles/cloudsql.client` (if using Cloud SQL)
 - **No**: Ability to modify infrastructure
 
 **CI Service Account**:
+
 - `roles/artifactregistry.writer` (scoped to heimdex repo)
 - `roles/run.admin` (for deployments)
 - `roles/iam.serviceAccountUser` (to deploy as API/Worker SAs)
@@ -181,6 +200,7 @@ config.log_summary(redact_secrets=True)
 ### Workload Identity Federation
 
 **No Long-Lived Keys**:
+
 ```bash
 # ❌ Don't create service account keys
 gcloud iam service-accounts keys create key.json --iam-account=...
@@ -190,6 +210,7 @@ gcloud iam workload-identity-pools create-cred-config ...
 ```
 
 **Benefits**:
+
 - Keys rotate automatically (every 10 minutes)
 - No key leakage risk
 - GitHub OIDC token authentication
@@ -200,10 +221,12 @@ gcloud iam workload-identity-pools create-cred-config ...
 ### Cloud Run Ingress Controls
 
 **API Service**: `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`
+
 - Accessible via Cloud Load Balancer
 - Optional: Restrict to Cloud Armor allowlist
 
 **Worker Service**: `INGRESS_TRAFFIC_INTERNAL_ONLY`
+
 - No public internet access
 - Only accessible from VPC
 
@@ -220,6 +243,7 @@ gcloud iam workload-identity-pools create-cred-config ...
 **Cloud Run**: Volumes encrypted by default (Google-managed keys)
 
 **PostgreSQL**:
+
 - Supabase: Encrypted by default
 - Cloud SQL: Automatic encryption
 
@@ -228,11 +252,13 @@ gcloud iam workload-identity-pools create-cred-config ...
 ### Encryption in Transit
 
 **HTTPS Only**:
+
 - Cloud Run enforces HTTPS
 - TLS 1.2+ required
 - HTTP requests automatically redirected
 
 **Database Connections**:
+
 ```python
 # PostgreSQL: SSL mode required in production
 PGSSLMODE=require
@@ -241,6 +267,7 @@ PGSSLMODE=require
 ### Data Redaction
 
 **Logging**:
+
 ```python
 # Automatic redaction
 config.log_summary(redact_secrets=True)
@@ -251,6 +278,7 @@ config.log_summary(redact_secrets=True)
 ```
 
 **Never Logged**:
+
 - Passwords
 - JWT secrets
 - API keys
@@ -261,6 +289,7 @@ config.log_summary(redact_secrets=True)
 ### Dependency Pinning
 
 **Strict Version Ranges**:
+
 ```toml
 [dependencies]
 fastapi = ">=0.104.0,<1.0.0"  # Allows patches, not majors
@@ -272,6 +301,7 @@ pydantic = ">=2.0.0,<3.0.0"
 ### Automated Updates
 
 **Dependabot Configuration**:
+
 ```yaml
 version: 2
 updates:
@@ -283,6 +313,7 @@ updates:
 ```
 
 **Review Process**:
+
 1. Dependabot opens PR with changelog
 2. CI runs tests + security scans
 3. Manual review for breaking changes
@@ -291,11 +322,13 @@ updates:
 ### Vulnerability Monitoring
 
 **Tools**:
+
 - Trivy (container scanning)
 - GitHub Security Advisories
 - Dependabot alerts
 
 **Response SLA**:
+
 - **Critical**: Patch within 24 hours
 - **High**: Patch within 7 days
 - **Medium/Low**: Next release cycle
@@ -305,6 +338,7 @@ updates:
 ### Input Validation
 
 **FastAPI Pydantic Models**:
+
 ```python
 class JobCreateRequest(BaseModel):
     type: str  # Validated against enum
@@ -312,6 +346,7 @@ class JobCreateRequest(BaseModel):
 ```
 
 **Benefits**:
+
 - Type safety
 - Automatic 422 errors for invalid input
 - No SQL injection (using ORM)
@@ -319,6 +354,7 @@ class JobCreateRequest(BaseModel):
 ### SQL Injection Prevention
 
 **Use SQLAlchemy ORM**:
+
 ```python
 # ✅ Safe - parameterized query
 job = session.query(Job).filter(Job.id == job_id).first()
@@ -330,12 +366,14 @@ session.execute(f"SELECT * FROM jobs WHERE id = '{job_id}'")
 ### XSS Prevention
 
 **API-Only**: No HTML rendering, only JSON responses
+
 - Content-Type: application/json
 - No user-generated HTML
 
 ### CSRF Protection
 
 **Not Required**: API uses Bearer tokens (not cookies)
+
 - SameSite cookies not used
 - Stateless authentication
 
@@ -344,12 +382,14 @@ session.execute(f"SELECT * FROM jobs WHERE id = '{job_id}'")
 ### Security Logging
 
 **Audit Events Logged**:
+
 - Authentication attempts (success/failure)
 - Authorization failures (403 responses)
 - Resource access (job creation, retrieval)
 - Configuration changes
 
 **Log Format**: Structured JSON
+
 ```json
 {
   "ts": "2025-01-15T10:30:00Z",
@@ -364,12 +404,14 @@ session.execute(f"SELECT * FROM jobs WHERE id = '{job_id}'")
 ### Alerting
 
 **Critical Alerts**:
+
 - High 401/403 error rate (>10% requests)
 - Repeated authentication failures (>100/min)
 - Unauthorized secret access attempts
 - Container vulnerability CRITICAL/HIGH
 
 **Channels**:
+
 - Cloud Monitoring → PagerDuty
 - Slack notifications for warnings
 
@@ -390,10 +432,12 @@ session.execute(f"SELECT * FROM jobs WHERE id = '{job_id}'")
 ### Audit Logs
 
 **Cloud Logging Retention**:
+
 - Default: 30 days
 - Recommended: 365 days for production
 
 **Audit Queries**:
+
 ```bash
 # All authentication events
 gcloud logging read "jsonPayload.msg=~'auth_.*'" --limit=100
@@ -408,12 +452,14 @@ gcloud logging read "protoPayload.serviceName='secretmanager.googleapis.com'" --
 ### Compliance Readiness
 
 **SOC 2 Type II**:
+
 - [x] Least-privilege IAM
 - [x] Encryption at rest/transit
 - [x] Audit logging
 - [ ] Formal access review process (manual for now)
 
 **PCI-DSS** (if processing payments):
+
 - [x] No cardholder data stored
 - [x] Containers run as non-root
 - [x] Network segmentation (internal-only worker)
@@ -445,9 +491,10 @@ gcloud logging read "protoPayload.serviceName='secretmanager.googleapis.com'" --
 
 ## Reporting Security Issues
 
-**Contact**: security@heimdex.example.com (create this)
+**Contact**: <security@heimdex.example.com> (create this)
 
 **Process**:
+
 1. **Do not** open a public GitHub issue
 2. Email details to security contact
 3. Include:

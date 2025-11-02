@@ -19,18 +19,21 @@ This document records the comprehensive changes made to introduce Alembic migrat
 **Problem**: Existing schema code used inline SQL with a `jobs` table (plural) that lacked fields for idempotency, org-scoping, and proper audit trails.
 
 **Solution**:
+
 - Created canonical SQLAlchemy models: `Job` (singular) and `JobEvent`
 - Initialized Alembic migration system in `packages/common/`
 - Generated initial migration: `001_job_ledger_init`
 - Compiled SQL for Supabase: `supabase/migrations/0001_job_ledger_init.sql`
 
 **Files Created**:
+
 - `packages/common/src/heimdex_common/models.py` - SQLAlchemy ORM models
 - `packages/common/alembic/` - Alembic migration infrastructure
 - `packages/common/alembic/versions/001_job_ledger_init.py` - Initial migration
 - `supabase/migrations/0001_job_ledger_init.sql` - Compiled SQL artifact
 
 **Files Modified**:
+
 - `packages/common/src/heimdex_common/db.py` - Replaced psycopg2-only code with SQLAlchemy session management
 - `packages/common/pyproject.toml` - Added dependencies: sqlalchemy, alembic
 
@@ -43,15 +46,18 @@ This document records the comprehensive changes made to introduce Alembic migrat
 **Problem**: Configuration was scattered across multiple files with hardcoded defaults and no validation.
 
 **Solution**:
+
 - Created `HeimdexConfig` Pydantic Settings class
 - Centralized all environment variables (PG*, REDIS_URL, QDRANT_URL, GCS_*)
 - Added validation (e.g., port range checks)
 - Implemented redacted logging for secrets
 
 **Files Created**:
+
 - `packages/common/src/heimdex_common/config.py` - Configuration management
 
 **Files Modified**:
+
 - `apps/api/src/heimdex_api/main.py` - Startup logs config summary
 - `apps/worker/src/heimdex_worker/main.py` - Startup logs config summary
 - `packages/common/pyproject.toml` - Added dependencies: pydantic, pydantic-settings
@@ -65,18 +71,22 @@ This document records the comprehensive changes made to introduce Alembic migrat
 **Problem**: No way to verify that critical dependencies (PostgreSQL, Redis, Qdrant, GCS) were reachable before accepting traffic.
 
 **Solution**:
+
 - Implemented lightweight probes for each dependency
 - Added `/readyz` endpoint to API with per-dependency timing
 - Distinguished `/healthz` (liveness) from `/readyz` (readiness)
 
 **Files Created**:
+
 - `packages/common/src/heimdex_common/probes.py` - Dependency probe implementations
 
 **Files Modified**:
+
 - `apps/api/src/heimdex_api/main.py` - Added `/readyz` endpoint
 - `packages/common/pyproject.toml` - Added dependencies: redis, requests, google-cloud-storage
 
 **New Endpoints**:
+
 - `GET /healthz` - Basic liveness check (always 200 if process alive)
 - `GET /readyz` - Readiness check with dependency probes (503 if any dep down)
 
@@ -87,13 +97,16 @@ This document records the comprehensive changes made to introduce Alembic migrat
 **Problem**: No easy way to run migrations or check readiness during development.
 
 **Solution**:
+
 - Added Makefile targets for common operations
 - Created migration helper commands
 
 **Files Modified**:
+
 - `Makefile` - Added `migrate`, `makemigration`, `migration-history`, `readyz` targets
 
 **New Commands**:
+
 ```bash
 make migrate           # Run Alembic migrations
 make makemigration     # Generate new migration
@@ -106,11 +119,13 @@ make readyz            # Check API readiness
 ### 5. Documentation
 
 **Files Created**:
+
 - `db-schema.md` - Complete schema reference with audit trail
 - `../development/configuration.md` - Environment variables and configuration guide
 - `2025-10-28-migration-to-alembic.md` - This file
 
 **Files Modified**:
+
 - `../architecture/overview.md` - Updated schema section, added "Dependency Readiness" section
 
 ---
@@ -132,6 +147,7 @@ make readyz            # Check API readiness
 **Goal**: Ensure new Python packages are installed correctly.
 
 **Steps**:
+
 ```bash
 # 1. Navigate to project root
 cd /Users/jangwonlee/Projects/heimdex
@@ -147,6 +163,7 @@ python3 -c "from heimdex_common.probes import probe_all_dependencies; print('✅
 ```
 
 **Expected Output**:
+
 ```
 ✅ Models import OK
 ✅ Config import OK
@@ -154,6 +171,7 @@ python3 -c "from heimdex_common.probes import probe_all_dependencies; print('✅
 ```
 
 **Troubleshooting**:
+
 - If imports fail, check that dependencies were added to `packages/common/pyproject.toml`
 - Run `uv pip install --system sqlalchemy alembic pydantic pydantic-settings redis requests google-cloud-storage`
 
@@ -164,6 +182,7 @@ python3 -c "from heimdex_common.probes import probe_all_dependencies; print('✅
 **Goal**: Ensure config loads from environment variables and validates correctly.
 
 **Steps**:
+
 ```bash
 # 1. Test with default values (should work)
 cd /Users/jangwonlee/Projects/heimdex
@@ -199,6 +218,7 @@ print('✅ Secrets are redacted')
 ```
 
 **Expected Output**:
+
 ```
 Environment: local
 PGHOST: localhost
@@ -218,6 +238,7 @@ Redis URL: redis://localhost:6379/0
 **Goal**: Ensure Alembic can read the migration and show history.
 
 **Steps**:
+
 ```bash
 # 1. Show Alembic version
 cd /Users/jangwonlee/Projects/heimdex/packages/common
@@ -231,6 +252,7 @@ alembic current
 ```
 
 **Expected Output**:
+
 ```
 alembic 1.13.x
 
@@ -246,6 +268,7 @@ Current revision(s) for postgresql://heimdex:***@localhost:5432/heimdex:
 ```
 
 **Troubleshooting**:
+
 - If `alembic: command not found`, run `uv pip install --system alembic`
 - If config errors occur, check `.env` file has `PGHOST`, `PGPORT`, etc.
 
@@ -256,6 +279,7 @@ Current revision(s) for postgresql://heimdex:***@localhost:5432/heimdex:
 **Goal**: Execute the Alembic migration and verify schema is created.
 
 **Steps**:
+
 ```bash
 # 1. Start Docker Compose services
 cd /Users/jangwonlee/Projects/heimdex
@@ -282,6 +306,7 @@ docker exec -it $(docker ps -qf "name=pg") psql -U heimdex -d heimdex -c "\d job
 ```
 
 **Expected Output**:
+
 ```
 INFO  [alembic.runtime.migration] Running upgrade  -> 001_job_ledger_init, Initial job ledger schema...
 
@@ -305,6 +330,7 @@ Table "public.job"
 ```
 
 **Troubleshooting**:
+
 - If `docker ps` shows no containers, run `make up` again
 - If migration fails with "connection refused", wait 10 seconds and retry
 - If tables already exist from old schema, run `make reset` to clean database
@@ -317,6 +343,7 @@ Table "public.job"
 **Goal**: Ensure API service boots successfully and logs redacted config.
 
 **Steps**:
+
 ```bash
 # 1. Check API container logs for startup message
 docker logs $(docker ps -qf "name=api") | grep starting | tail -1
@@ -329,6 +356,7 @@ curl -s http://localhost:8000/healthz | python3 -m json.tool
 ```
 
 **Expected Output**:
+
 ```json
 {
   "ts": "2025-10-28T...",
@@ -358,6 +386,7 @@ curl -s http://localhost:8000/healthz | python3 -m json.tool
 ```
 
 **Troubleshooting**:
+
 - If API doesn't start, check logs: `docker logs $(docker ps -qf "name=api")`
 - If config validation fails, check `.env` file or Docker Compose `environment` block
 - If you see Python import errors, rebuild images: `docker-compose -f deploy/docker-compose.yml build api`
@@ -369,6 +398,7 @@ curl -s http://localhost:8000/healthz | python3 -m json.tool
 **Goal**: Test `/readyz` endpoint returns dependency status.
 
 **Steps**:
+
 ```bash
 # 1. Check readiness with all dependencies up
 make readyz
@@ -393,6 +423,7 @@ make readyz
 ```
 
 **Expected Output** (Step 1):
+
 ```json
 {
   "ok": true,
@@ -409,6 +440,7 @@ make readyz
 ```
 
 **Expected Output** (Step 4, PostgreSQL down):
+
 ```json
 {
   "ok": false,
@@ -426,6 +458,7 @@ HTTP Status: 503
 ```
 
 **Troubleshooting**:
+
 - If all probes fail, check services are running: `docker ps`
 - If GCS probe fails with "bucket not found", this is expected if bucket wasn't created yet - it's safe to ignore in dev
 - If probes timeout, increase timeout in `probes.py` or check service logs for issues
@@ -437,6 +470,7 @@ HTTP Status: 503
 **Goal**: Ensure Worker service boots successfully.
 
 **Steps**:
+
 ```bash
 # 1. Check Worker container logs
 docker logs $(docker ps -qf "name=worker") | grep starting | tail -1
@@ -449,6 +483,7 @@ docker logs $(docker ps -qf "name=worker") | grep heartbeat | tail -3
 ```
 
 **Expected Output**:
+
 ```json
 {
   "ts": "2025-10-28T...",
@@ -479,6 +514,7 @@ docker logs $(docker ps -qf "name=worker") | grep heartbeat | tail -3
 **Important Note**: The existing job endpoints (`POST /jobs`, `GET /jobs/{id}`) will **NOT work yet** because they reference the old `jobs` table which has been dropped. This is expected and will be fixed in the next micro-step (#0.6).
 
 **Steps to verify infrastructure is healthy**:
+
 ```bash
 # 1. Verify API is accepting requests
 curl -s http://localhost:8000/healthz
@@ -496,6 +532,7 @@ docker exec -it $(docker ps -qf "name=pg") psql -U heimdex -d heimdex -c "SELECT
 ```
 
 **Expected Output**:
+
 ```json
 {"ok": true, "service": "heimdex-api", ...}
 
@@ -523,6 +560,7 @@ The migration created the new `job` table, but the API code in `apps/api/src/hei
 If you need to revert these changes:
 
 ### Option 1: Rollback Migration Only
+
 ```bash
 cd packages/common
 alembic downgrade base
@@ -531,6 +569,7 @@ alembic downgrade base
 This will drop the `job` and `job_event` tables.
 
 ### Option 2: Full Rollback with Git
+
 ```bash
 # Stash or commit current work
 git stash

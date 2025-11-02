@@ -71,6 +71,7 @@ nano terraform.tfvars
 ```
 
 **terraform.tfvars**:
+
 ```hcl
 project_id   = "heimdex-prod"
 region       = "us-central1"
@@ -111,6 +112,7 @@ terraform apply tfplan
 ```
 
 **Created Resources**:
+
 - Artifact Registry repository
 - Service accounts (API, Worker, CI)
 - Secret Manager secrets
@@ -118,6 +120,7 @@ terraform apply tfplan
 - IAM bindings
 
 **Outputs**:
+
 ```
 artifact_registry_url = "us-central1-docker.pkg.dev/heimdex-prod/heimdex"
 api_cloud_run_url     = "https://heimdex-api-prod-xxx.run.app"
@@ -174,6 +177,7 @@ gcloud iam workload-identity-pools providers describe $PROVIDER_NAME \
 ```
 
 **Output** (save for GitHub secrets):
+
 ```
 projects/123456789/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider
 ```
@@ -190,6 +194,7 @@ Add the following secrets to your GitHub repository (Settings → Secrets and va
 | `DEV_JWT_SECRET` | Strong random string | JWT secret for dev mode (32+ chars) |
 
 **Generate strong secret**:
+
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
@@ -226,6 +231,7 @@ Trigger the build workflow manually:
 5. Optionally specify a tag (defaults to git SHA)
 
 The workflow will:
+
 - Build Docker images
 - Scan for vulnerabilities (fails on CRITICAL/HIGH)
 - Push to Artifact Registry
@@ -238,7 +244,8 @@ Heimdex requires PostgreSQL and Redis. You can use:
 ### Option A: Supabase (Recommended for MVP)
 
 **PostgreSQL**:
-1. Create Supabase project at https://supabase.com
+
+1. Create Supabase project at <https://supabase.com>
 2. Get connection string from Settings → Database
 3. Add to Cloud Run via Secret Manager:
 
@@ -254,11 +261,12 @@ for SA in api worker; do
 done
 ```
 
-**Redis**: Use Upstash (https://upstash.com) or similar
+**Redis**: Use Upstash (<https://upstash.com>) or similar
 
 ### Option B: Cloud SQL + Memorystore
 
 Enable in Terraform:
+
 ```hcl
 enable_cloudsql = true
 enable_redis    = true
@@ -355,6 +363,7 @@ Add the provided DNS records to your domain registrar.
 ### Cloud Logging
 
 View logs:
+
 ```bash
 # API logs
 gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=heimdex-api-prod" \
@@ -368,6 +377,7 @@ gcloud logging read "resource.type=cloud_run_revision AND jsonPayload.level=ERRO
 ### Cloud Monitoring
 
 Create alerts for:
+
 - High error rates (>5% HTTP 5xx)
 - Cold starts (>500ms startup)
 - Memory usage (>80%)
@@ -377,11 +387,13 @@ Create alerts for:
 ### Free Tier Limits
 
 Cloud Run free tier per month:
+
 - 2 million requests
 - 360,000 GB-seconds memory
 - 180,000 vCPU-seconds
 
 **Estimate** (scale-to-zero with low traffic):
+
 - API: ~$5/month
 - Worker: ~$2/month
 - Artifact Registry: ~$1/month
@@ -431,6 +443,7 @@ terraform apply
 **Cause**: Cloud Run caches images
 
 **Solution**: Use explicit tags (not `latest`) or redeploy:
+
 ```bash
 gcloud run services update heimdex-api-prod --region=$REGION
 ```
@@ -440,6 +453,7 @@ gcloud run services update heimdex-api-prod --region=$REGION
 **Cause**: Incorrect connection string or network access
 
 **Solution**:
+
 1. Check `PGHOST` secret value
 2. Verify database allows connections from Cloud Run IPs
 3. Use Cloud SQL Proxy if using Cloud SQL

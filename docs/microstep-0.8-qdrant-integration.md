@@ -34,6 +34,7 @@ This microstep implements the "Hello Write" integration for Qdrant, Heimdex's ve
 ### Scope
 
 This is a **foundational implementation** that establishes:
+
 - Vector database infrastructure (Qdrant service)
 - Repository layer for vector operations
 - Worker actors for async embedding generation
@@ -41,6 +42,7 @@ This is a **foundational implementation** that establishes:
 - Health monitoring and readiness probes
 
 **What this is NOT:**
+
 - This does NOT include real embedding models (uses deterministic mock vectors)
 - This does NOT include semantic search endpoints (search infrastructure is in place but not exposed)
 - This does NOT include batch processing or bulk operations
@@ -52,6 +54,7 @@ This is a **foundational implementation** that establishes:
 ### 1. Infrastructure Layer
 
 #### Docker Compose Service
+
 **File**: `deploy/docker-compose.yml`
 
 ```yaml
@@ -71,15 +74,18 @@ qdrant:
 ```
 
 **Key Points**:
+
 - Qdrant v1.11.3 chosen for compatibility with qdrant-client 1.15.1
 - Data persisted to named volume `qdrant_data`
 - Health check using Qdrant's built-in `/healthz` endpoint
 - Restart policy: `unless-stopped` for resilience
 
 #### Configuration
+
 **Files**: `deploy/.env`, `deploy/.env.example`, `packages/common/src/heimdex_common/config.py`
 
 New environment variables:
+
 ```bash
 QDRANT_URL=http://qdrant:6333
 VECTOR_SIZE=384
@@ -87,6 +93,7 @@ ENABLE_QDRANT=false  # Profile-aware readiness (disabled by default)
 ```
 
 New config fields in `HeimdexConfig`:
+
 ```python
 vector_size: int = Field(
     default=384,
@@ -96,6 +103,7 @@ vector_size: int = Field(
 ```
 
 #### Dependencies
+
 **File**: `packages/common/pyproject.toml`
 
 ```toml
@@ -113,17 +121,20 @@ dependencies = [
 #### Core Functions
 
 ##### `client() -> QdrantClient`
+
 - **Purpose**: Memoized Qdrant HTTP client for connection pooling
 - **Pattern**: Singleton with `@lru_cache(maxsize=1)`
 - **Configuration**: Reads `QDRANT_URL` from config
 
 ##### `ensure_collection(name, vector_size, distance="Cosine") -> None`
+
 - **Purpose**: Idempotent collection creation
 - **Behavior**: No-op if collection already exists
 - **Supported Distances**: Cosine, Euclid, Dot, Manhattan
 - **Default**: Cosine (suitable for normalized embeddings)
 
 ##### `point_id_for(org_id, asset_id, segment_id, model, model_ver) -> str`
+
 - **Purpose**: Generate deterministic point IDs for idempotent upserts
 - **Algorithm**:
   1. Create composite key: `{org_id}:{asset_id}:{segment_id}:{model}:{model_ver}`
@@ -133,6 +144,7 @@ dependencies = [
 - **Why UUID**: Qdrant requires point IDs to be either unsigned integers or UUIDs
 
 ##### `upsert_point(collection_name, point_id, vector, payload) -> None`
+
 - **Purpose**: Insert or update a vector point
 - **Idempotency**: Same point_id overwrites existing point
 - **Parameters**:
@@ -142,6 +154,7 @@ dependencies = [
   - `payload`: Metadata dict (must include `org_id` for tenant isolation)
 
 ##### `search(collection_name, vector, limit=5, query_filter=None) -> list[dict]`
+
 - **Purpose**: Find similar vectors
 - **Returns**: List of `{id, score, payload}` dicts
 - **Filtering**: Supports Qdrant filter syntax for tenant isolation
@@ -163,6 +176,7 @@ def mock_embedding(job_id: str, org_id: str, asset_id: str, segment_id: str) -> 
 ```
 
 **Workflow**:
+
 1. **Idempotency Check**: Verify job not in terminal state
 2. **Collection Setup**: Ensure "embeddings" collection exists
 3. **Vector Generation**:
@@ -173,6 +187,7 @@ def mock_embedding(job_id: str, org_id: str, asset_id: str, segment_id: str) -> 
 6. **Job Update**: Mark as SUCCEEDED with result metadata
 
 **Deterministic Vector Generation**:
+
 ```python
 seed_string = f"{org_id}:{asset_id}:{segment_id}:mock:v1"
 seed_hash = hashlib.sha256(seed_string.encode("utf-8")).digest()
@@ -182,6 +197,7 @@ vector = rng.random(vector_size).astype(np.float32).tolist()
 ```
 
 **Payload Structure**:
+
 ```json
 {
   "org_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -200,6 +216,7 @@ vector = rng.random(vector_size).astype(np.float32).tolist()
 #### Endpoint: `POST /vectors/mock`
 
 **Request**:
+
 ```json
 {
   "asset_id": "doc-123",
@@ -208,6 +225,7 @@ vector = rng.random(vector_size).astype(np.float32).tolist()
 ```
 
 **Response**:
+
 ```json
 {
   "job_id": "de814553-0777-4b0f-b866-b4c7d402563d",
@@ -219,10 +237,12 @@ vector = rng.random(vector_size).astype(np.float32).tolist()
 **Authentication**: JWT Bearer token required (provides `org_id` and `user_id`)
 
 **Idempotency**:
+
 - Deterministic job key: `hash(org_id, "mock_embedding", {asset_id, segment_id, model, model_ver})`
 - Duplicate requests return existing job_id
 
 **Transactional Outbox Pattern**:
+
 1. Create Job record (QUEUED)
 2. Create JobEvent (QUEUED)
 3. Create Outbox message (unsent)
@@ -243,11 +263,13 @@ def _probe_qdrant_once(timeout_ms: int) -> tuple[bool, float, str | None]:
 ```
 
 **Profile-Aware Readiness**:
+
 - Only checked if `ENABLE_QDRANT=true`
 - Skipped if disabled (allows services without Qdrant dependency)
 - Cached for 10 seconds on success, 30 seconds on failure
 
 **Endpoint**: `GET /readyz`
+
 ```json
 {
   "service": "api",
@@ -274,6 +296,7 @@ app.include_router(vectors_router)
 ```
 
 Routes registered under `/vectors` prefix:
+
 - `POST /vectors/mock` - Create mock embedding job
 
 ---
@@ -285,6 +308,7 @@ Routes registered under `/vectors` prefix:
 **Decision**: Use SHA256 hash → UUID conversion for point IDs
 
 **Rationale**:
+
 - **Idempotency**: Same inputs always produce same ID, enabling safe retries
 - **Qdrant Compatibility**: Qdrant requires UUIDs or unsigned integers (not arbitrary strings)
 - **Uniqueness**: SHA256 provides 256-bit hash space, UUID uses first 128 bits
@@ -293,6 +317,7 @@ Routes registered under `/vectors` prefix:
 **Collision Risk**: Negligible (2^-128 for UUID collision)
 
 **Alternative Considered**: Sequential integer IDs
+
 - ❌ Not deterministic (can't regenerate same ID from inputs)
 - ❌ Requires ID allocation service
 - ✅ Slightly more storage efficient
@@ -302,6 +327,7 @@ Routes registered under `/vectors` prefix:
 **Decision**: Qdrant v1.11.3
 
 **Rationale**:
+
 - qdrant-client 1.15.1 requires server version within 1 minor version
 - v1.7.4 initially caused "Format error in JSON body" errors
 - v1.11.3 is latest compatible version
@@ -313,12 +339,14 @@ Routes registered under `/vectors` prefix:
 **Decision**: Deterministic seeded random vectors (not zero vectors)
 
 **Rationale**:
+
 - **Realistic Testing**: Random vectors approximate real embedding distributions
 - **Reproducibility**: Seeded RNG ensures same inputs → same vector
 - **Idempotency Verification**: Can verify upsert worked by regenerating vector
 - **Distance Metrics**: Non-zero vectors allow testing cosine/euclidean distance
 
 **Alternative Considered**: Zero vectors
+
 - ❌ Unrealistic (all vectors identical)
 - ❌ Can't test similarity search effectively
 - ✅ Simpler implementation
@@ -328,11 +356,13 @@ Routes registered under `/vectors` prefix:
 **Decision**: Single "embeddings" collection with model/version in payload
 
 **Rationale**:
+
 - **Flexibility**: Can query across models or filter to specific model
 - **Multi-Tenancy**: `org_id` in payload enables tenant filtering
 - **Simplicity**: One collection easier to manage than per-model collections
 
 **Schema**:
+
 ```python
 {
   "name": "embeddings",
@@ -356,12 +386,14 @@ Routes registered under `/vectors` prefix:
 **Decision**: Use existing transactional outbox + Dramatiq pattern
 
 **Rationale**:
+
 - **Consistency**: Follows established pattern from Microstep 0.7
 - **Exactly-Once**: Guarantees job published exactly once
 - **Observability**: Full job lifecycle tracking via JobStatus/JobEvents
 - **Decoupling**: API responds immediately, worker processes async
 
 **Flow**:
+
 ```
 Client → POST /vectors/mock → API Service
                                 ↓ (transactional)
@@ -377,11 +409,13 @@ Client → POST /vectors/mock → API Service
 ### 6. Tenant Isolation Strategy
 
 **Multi-Layer Isolation**:
+
 1. **Point ID Level**: `org_id` in composite key ensures unique IDs per tenant
 2. **Payload Level**: `org_id` in metadata enables filtering
 3. **API Level**: JWT provides `org_id`, enforces ownership
 
 **Why Not Per-Tenant Collections?**
+
 - ❌ Management overhead (create/delete collections per tenant)
 - ❌ Harder to query across tenants (e.g., admin dashboards)
 - ❌ Resource inefficiency (separate indexes per tenant)
@@ -420,6 +454,7 @@ Client → POST /vectors/mock → API Service
 #### 1. Replace Mock Embedding with Real Model
 
 **Current** (`apps/worker/src/heimdex_worker/tasks.py`):
+
 ```python
 # Mock vector generation
 seed_string = f"{org_id}:{asset_id}:{segment_id}:mock:v1"
@@ -429,6 +464,7 @@ vector = rng.random(vector_size).astype(np.float32).tolist()
 ```
 
 **Production**:
+
 ```python
 # Real embedding model (e.g., SentenceTransformers)
 from sentence_transformers import SentenceTransformer
@@ -438,6 +474,7 @@ vector = model.encode(text_content).tolist()
 ```
 
 **Considerations**:
+
 - Model loading: Cache model instance globally or use model server
 - GPU support: Add CUDA dependencies, configure worker containers
 - Batching: Process multiple segments in single forward pass
@@ -446,6 +483,7 @@ vector = model.encode(text_content).tolist()
 #### 2. Create Production Endpoints
 
 **New Endpoints Needed**:
+
 ```python
 # Real embedding creation
 POST /vectors/embed
@@ -474,6 +512,7 @@ DELETE /vectors/{point_id}
 #### 3. Add Model Management
 
 **Model Registry** (`packages/common/src/heimdex_common/models/embedding.py`):
+
 ```python
 SUPPORTED_MODELS = {
     "minilm-l6-v2": {
@@ -492,11 +531,13 @@ SUPPORTED_MODELS = {
 #### 4. Text Extraction Pipeline
 
 **For Different Asset Types**:
+
 - **Documents**: PDF → text chunks → embeddings
 - **Videos**: Transcript → chunks → embeddings
 - **Images**: OCR/captions → embeddings
 
 **Chunking Strategy**:
+
 - Fixed-size chunks with overlap (e.g., 512 tokens, 50-token overlap)
 - Semantic chunking (sentence/paragraph boundaries)
 - Store chunk metadata in payload for retrieval
@@ -527,6 +568,7 @@ POST /vectors/embed/batch
 **File**: `test_e2e_qdrant.py`
 
 **Test Coverage**:
+
 1. ✅ JWT token creation (dev mode)
 2. ✅ Job creation via POST /vectors/mock
 3. ✅ Job status polling until completion
@@ -535,6 +577,7 @@ POST /vectors/embed/batch
 6. ⚠️ Direct Qdrant verification (requires qdrant-client locally)
 
 **Test Results** (2025-10-30):
+
 ```
 ✓ Job created: de814553-0777-4b0f-b866-b4c7d402563d
 ✓ Job completed in ~2 seconds
@@ -582,6 +625,7 @@ docker compose logs worker --tail=50
 ### Integration Test Coverage
 
 **What's Tested**:
+
 - ✅ API authentication and authorization
 - ✅ Transactional outbox pattern
 - ✅ Outbox dispatcher publishing
@@ -595,6 +639,7 @@ docker compose logs worker --tail=50
 - ✅ Error handling and retries
 
 **What's NOT Tested**:
+
 - ❌ Real embedding models
 - ❌ Semantic search queries
 - ❌ Large-scale vector operations (>10k points)
@@ -609,11 +654,13 @@ docker compose logs worker --tail=50
 ### Local Development
 
 **Prerequisites**:
+
 - Docker & Docker Compose
 - Python 3.11+
 - uv package manager
 
 **Steps**:
+
 ```bash
 # 1. Clone repository
 git clone <repo-url>
@@ -639,6 +686,7 @@ python test_e2e_qdrant.py
 #### Environment Variables
 
 **Required**:
+
 ```bash
 # Qdrant Connection
 QDRANT_URL=https://qdrant.production.internal:6333
@@ -654,6 +702,7 @@ REDIS_URL=redis://<redis-host>:6379/0
 ```
 
 **Optional**:
+
 ```bash
 # Qdrant Tuning
 QDRANT_COLLECTION_NAME=embeddings  # Default: "embeddings"
@@ -668,6 +717,7 @@ PROBE_CACHE_SEC=10
 #### Qdrant Deployment Options
 
 **Option 1: Self-Hosted Docker**
+
 ```yaml
 qdrant:
   image: qdrant/qdrant:v1.11.3
@@ -681,12 +731,14 @@ qdrant:
 ```
 
 **Option 2: Qdrant Cloud** (Recommended for Production)
-- Managed service: https://cloud.qdrant.io/
+
+- Managed service: <https://cloud.qdrant.io/>
 - Built-in backups, monitoring, scaling
 - Set `QDRANT_URL` to cloud endpoint
 - Provide `QDRANT_API_KEY` for authentication
 
 **Option 3: Kubernetes StatefulSet**
+
 ```yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -708,16 +760,19 @@ spec:
 #### Resource Requirements
 
 **Qdrant Service**:
+
 - CPU: 2 cores minimum, 4+ recommended
 - Memory: 4GB minimum, 8GB+ recommended
 - Storage: 50GB+ SSD (scales with number of vectors)
 
 **Estimation**:
+
 - 1M vectors (384-dim): ~1.5GB storage
 - 10M vectors (384-dim): ~15GB storage
 - Add 50% overhead for indexes
 
 **Worker Service** (when using real models):
+
 - CPU: 4 cores (for model inference)
 - Memory: 8GB (for model loading)
 - GPU: Optional but recommended (10-50x speedup)
@@ -725,6 +780,7 @@ spec:
 #### Monitoring
 
 **Qdrant Metrics** (exposed on `:6333/metrics`):
+
 ```
 qdrant_rest_responses_total
 qdrant_rest_responses_duration_seconds
@@ -733,6 +789,7 @@ qdrant_collections_vector_count
 ```
 
 **Application Metrics**:
+
 - Track in JobEvents: `stage="upserting_vector"` → `stage="completed"`
 - Monitor job success rate: `SUCCEEDED` vs `FAILED`
 - Latency: time from job creation to completion
@@ -740,6 +797,7 @@ qdrant_collections_vector_count
 #### Backup Strategy
 
 **Qdrant Snapshots**:
+
 ```bash
 # Create snapshot
 curl -X POST http://qdrant:6333/collections/embeddings/snapshots
@@ -753,6 +811,7 @@ curl http://qdrant:6333/collections/embeddings/snapshots/<snapshot-name> \
 ```
 
 **Automated Backups** (cronjob):
+
 ```bash
 #!/bin/bash
 # backup-qdrant.sh
@@ -769,11 +828,13 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 ### Critical for Production (P0)
 
 #### 1. Real Embedding Model Integration
+
 **Status**: 🔴 Required
 **Effort**: 3-5 days
 **Blocked By**: Model selection decision
 
 **Tasks**:
+
 - [ ] Select embedding model (SentenceTransformers, OpenAI, Cohere)
 - [ ] Create model loading/caching infrastructure
 - [ ] Implement `generate_embedding` actor
@@ -782,16 +843,19 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Document model versioning strategy
 
 **Acceptance Criteria**:
+
 - Worker can generate real embeddings from text
 - Embeddings are reproducible for same input
 - Latency < 100ms per embedding (with GPU)
 - Model version tracked in Qdrant payload
 
 #### 2. Production API Endpoints
+
 **Status**: 🔴 Required
 **Effort**: 2-3 days
 
 **Tasks**:
+
 - [ ] Implement `POST /vectors/embed` (real embedding creation)
 - [ ] Implement `POST /vectors/search` (semantic search)
 - [ ] Implement `GET /vectors/{point_id}` (retrieve vector)
@@ -801,16 +865,19 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Update OpenAPI docs
 
 **Acceptance Criteria**:
+
 - All CRUD operations supported
 - Semantic search returns relevant results
 - Proper error handling (model not found, collection missing)
 - Rate limits prevent abuse
 
 #### 3. Text Extraction & Chunking
+
 **Status**: 🔴 Required
 **Effort**: 3-5 days
 
 **Tasks**:
+
 - [ ] Implement PDF text extraction
 - [ ] Implement chunking strategy (fixed-size with overlap)
 - [ ] Add chunk metadata (page number, position)
@@ -819,6 +886,7 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Test with large documents (>1000 pages)
 
 **Acceptance Criteria**:
+
 - Can extract text from PDF, DOCX, TXT
 - Chunks respect semantic boundaries
 - Metadata includes source location
@@ -827,25 +895,30 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 ### Important for Production (P1)
 
 #### 4. Batch Operations
+
 **Status**: 🟡 Nice to Have
 **Effort**: 2 days
 
 **Tasks**:
+
 - [ ] Implement batch embedding endpoint
 - [ ] Worker processes multiple segments in single job
 - [ ] Optimize for batch inference (GPU utilization)
 - [ ] Add progress reporting for batch jobs
 
 **Benefits**:
+
 - 5-10x faster for large documents
 - Better GPU utilization
 - Lower API overhead
 
 #### 5. Advanced Search Features
+
 **Status**: 🟡 Nice to Have
 **Effort**: 3 days
 
 **Tasks**:
+
 - [ ] Implement hybrid search (vector + keyword)
 - [ ] Add re-ranking (MMR, diversity)
 - [ ] Support multi-vector queries
@@ -853,10 +926,12 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Implement pagination for large result sets
 
 #### 6. Monitoring & Observability
+
 **Status**: 🟡 Important
 **Effort**: 2-3 days
 
 **Tasks**:
+
 - [ ] Add Prometheus metrics for Qdrant operations
 - [ ] Create Grafana dashboard (vector count, search latency)
 - [ ] Set up alerts (collection missing, high error rate)
@@ -864,10 +939,12 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Log search queries for analytics
 
 #### 7. Performance Optimization
+
 **Status**: 🟡 Important
 **Effort**: 3-5 days
 
 **Tasks**:
+
 - [ ] Benchmark Qdrant with realistic data (1M+ vectors)
 - [ ] Tune Qdrant HNSW parameters (m, ef_construct)
 - [ ] Implement vector caching (reduce duplicate embeddings)
@@ -877,30 +954,36 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 ### Nice to Have (P2)
 
 #### 8. Multi-Model Support
+
 **Status**: 🟢 Future Enhancement
 **Effort**: 2-3 days
 
 **Tasks**:
+
 - [ ] Support multiple embedding models simultaneously
 - [ ] Add model selection at query time
 - [ ] Implement model performance tracking
 - [ ] Create model recommendation system
 
 #### 9. Advanced Qdrant Features
+
 **Status**: 🟢 Future Enhancement
 **Effort**: 3-5 days
 
 **Tasks**:
+
 - [ ] Implement quantization for storage efficiency
 - [ ] Add payload indexing for faster filtering
 - [ ] Use sparse vectors for keyword search
 - [ ] Implement multi-vector embeddings (late interaction)
 
 #### 10. Developer Experience
+
 **Status**: 🟢 Quality of Life
 **Effort**: 2 days
 
 **Tasks**:
+
 - [ ] Create vector playground UI
 - [ ] Add embedding visualization (t-SNE, UMAP)
 - [ ] Build search relevance testing tool
@@ -909,10 +992,12 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 ### Testing & Validation (Ongoing)
 
 #### 11. Comprehensive Testing
+
 **Status**: 🟡 Important
 **Effort**: 3-5 days
 
 **Tasks**:
+
 - [ ] Unit tests for `qdrant_repo.py` (all functions)
 - [ ] Integration tests for worker actor
 - [ ] API endpoint tests (auth, validation, errors)
@@ -920,10 +1005,12 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 - [ ] Chaos tests (Qdrant downtime, network partitions)
 
 #### 12. Security Audit
+
 **Status**: 🟡 Important
 **Effort**: 2 days
 
 **Tasks**:
+
 - [ ] Verify tenant isolation (can't access other org's vectors)
 - [ ] Test injection attacks (filter bypasses)
 - [ ] Validate auth on all endpoints
@@ -939,6 +1026,7 @@ curl http://qdrant:6333/collections/embeddings/snapshots/$SNAPSHOT \
 #### 1. Job Fails with "Format error in JSON body"
 
 **Symptom**:
+
 ```
 Unexpected Response: 400 (Bad Request)
 Format error in JSON body: data did not match any variant...
@@ -947,6 +1035,7 @@ Format error in JSON body: data did not match any variant...
 **Cause**: Qdrant version incompatibility (v1.7.4 had this issue)
 
 **Solution**:
+
 ```bash
 # Update to Qdrant v1.11.3+
 docker compose down
@@ -957,6 +1046,7 @@ docker compose up -d
 #### 2. Point ID Rejection
 
 **Symptom**:
+
 ```
 value abc123... is not a valid point ID,
 valid values are either an unsigned integer or a UUID
@@ -965,6 +1055,7 @@ valid values are either an unsigned integer or a UUID
 **Cause**: Using SHA256 hex string instead of UUID
 
 **Solution**: Ensure `point_id_for()` converts hash to UUID:
+
 ```python
 point_uuid = uuid.UUID(bytes=hash_bytes[:16])
 return str(point_uuid)  # Not hexdigest()
@@ -973,6 +1064,7 @@ return str(point_uuid)  # Not hexdigest()
 #### 3. Collection Not Found
 
 **Symptom**:
+
 ```
 Collection 'embeddings' not found
 ```
@@ -980,6 +1072,7 @@ Collection 'embeddings' not found
 **Cause**: Worker tried to upsert before collection created
 
 **Solution**: `ensure_collection()` is idempotent, call before every upsert:
+
 ```python
 ensure_collection("embeddings", vector_size=384)
 upsert_point(...)
@@ -988,6 +1081,7 @@ upsert_point(...)
 #### 4. Qdrant Client Version Warning
 
 **Symptom**:
+
 ```
 UserWarning: Qdrant client version 1.15.1 is incompatible
 with server version 1.11.3
@@ -996,17 +1090,20 @@ with server version 1.11.3
 **Impact**: ⚠️ Warning only (works fine, but not fully compatible)
 
 **Solution**:
+
 - Short-term: Ignore (functionality works)
 - Long-term: Update qdrant-client when server upgrades to v1.12+
 
 #### 5. Worker Can't Connect to Qdrant
 
 **Symptom**:
+
 ```
 ConnectionRefusedError: [Errno 111] Connection refused
 ```
 
 **Diagnosis**:
+
 ```bash
 # Check Qdrant health
 docker compose ps qdrant
@@ -1017,6 +1114,7 @@ docker compose exec worker curl http://qdrant:6333/
 ```
 
 **Solution**:
+
 - Ensure Qdrant service is healthy
 - Check network connectivity (same Docker network)
 - Verify `QDRANT_URL` env var
@@ -1026,6 +1124,7 @@ docker compose exec worker curl http://qdrant:6333/
 **Symptom**: Same asset/segment creates multiple jobs
 
 **Diagnosis**:
+
 ```python
 # Check job_key generation
 from heimdex_common.job_utils import make_job_key
@@ -1044,6 +1143,7 @@ assert key1 == key2  # Must be True
 #### 7. Vector Dimensionality Mismatch
 
 **Symptom**:
+
 ```
 Wrong input: Dimensionality of vectors does not match
 Expected: 384, Got: 768
@@ -1052,6 +1152,7 @@ Expected: 384, Got: 768
 **Cause**: `VECTOR_SIZE` config doesn't match model output
 
 **Solution**:
+
 ```bash
 # Update config to match model
 VECTOR_SIZE=768  # For BERT-base
@@ -1059,6 +1160,7 @@ VECTOR_SIZE=1536  # For OpenAI ada-002
 ```
 
 Then recreate collection:
+
 ```bash
 curl -X DELETE http://localhost:6333/collections/embeddings
 # Collection will be recreated with correct size
@@ -1085,17 +1187,20 @@ curl -X DELETE http://localhost:6333/collections/embeddings
 ### Code References
 
 **Key Files**:
+
 - `packages/common/src/heimdex_common/vector/qdrant_repo.py` - Vector operations
 - `apps/worker/src/heimdex_worker/tasks.py` - Embedding actor
 - `apps/api/src/heimdex_api/vectors.py` - API endpoints
 - `packages/common/src/heimdex_common/probes.py` - Health checks
 
 **Configuration**:
+
 - `deploy/docker-compose.yml` - Service definitions
 - `deploy/.env.example` - Environment variables
 - `packages/common/src/heimdex_common/config.py` - Config schema
 
 **Tests**:
+
 - `test_e2e_qdrant.py` - End-to-end integration test
 
 ---

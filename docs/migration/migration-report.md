@@ -38,7 +38,7 @@ This migration successfully transitions the Heimdex codebase from raw psycopg2 d
 
 ### Created Files
 
-1. **packages/common/src/heimdex_common/repositories/__init__.py** (NEW)
+1. **packages/common/src/heimdex_common/repositories/**init**.py** (NEW)
    - Package initialization for repository layer
    - Exports: `JobRepository`
 
@@ -104,6 +104,7 @@ CREATE INDEX idx_jobs_created_at ON jobs(created_at);
 ```
 
 **Issues with old schema**:
+
 - No multi-tenancy support (`org_id` missing)
 - No idempotency mechanism
 - No retry counter (`attempt`)
@@ -174,6 +175,7 @@ CREATE TABLE job_event (
 ```
 
 **Purpose**: Immutable audit log for:
+
 - Complete job state transition history
 - Stage and progress tracking (in `detail_json`)
 - Result storage on terminal states
@@ -239,6 +241,7 @@ class JobRepository:
 ```
 
 **Design Patterns**:
+
 - Repository pattern: Clean separation of data access from business logic
 - Context manager integration: Works seamlessly with `get_db()` sessions
 - Backward compatibility layer: `update_job_with_stage_progress()` bridges old/new
@@ -251,6 +254,7 @@ class JobRepository:
 #### Endpoint: `POST /jobs` (Create Job)
 
 **Before** (psycopg2):
+
 ```python
 job_id = str(uuid.uuid4())
 with get_db() as conn, conn.cursor() as cur:
@@ -264,6 +268,7 @@ with get_db() as conn, conn.cursor() as cur:
 ```
 
 **After** (SQLAlchemy + Repository):
+
 ```python
 default_org_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
@@ -279,6 +284,7 @@ with get_db() as session:
 ```
 
 **Benefits**:
+
 - No SQL injection risk (ORM handles parameterization)
 - Automatic event logging (initial state recorded)
 - Future-ready for multi-tenancy (org_id parameter)
@@ -287,6 +293,7 @@ with get_db() as session:
 #### Endpoint: `GET /jobs/{job_id}` (Get Job Status)
 
 **Before** (psycopg2):
+
 ```python
 with get_db() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
     cur.execute(
@@ -312,6 +319,7 @@ return JobStatusResponse(
 ```
 
 **After** (SQLAlchemy + Repository with backward compatibility):
+
 ```python
 with get_db() as session:
     repo = JobRepository(session)
@@ -354,6 +362,7 @@ with get_db() as session:
 ```
 
 **Key Features**:
+
 - ✅ **Zero Breaking Changes**: API response structure identical
 - ✅ **Status Mapping**: Transparent translation of new status values
 - ✅ **Event Querying**: Retrieves stage/progress from latest event
@@ -367,6 +376,7 @@ with get_db() as session:
 #### Function: `_update_job_status()`
 
 **Before** (psycopg2):
+
 ```python
 def _update_job_status(job_id, status, stage, progress, result, error):
     with get_db() as conn, conn.cursor() as cur:
@@ -389,6 +399,7 @@ def _update_job_status(job_id, status, stage, progress, result, error):
 ```
 
 **After** (SQLAlchemy + Repository):
+
 ```python
 def _update_job_status(job_id, status, stage, progress, result, error):
     # Map old status values to new
@@ -415,6 +426,7 @@ def _update_job_status(job_id, status, stage, progress, result, error):
 ```
 
 **Benefits**:
+
 - No string concatenation for SQL (ORM handles updates)
 - Automatic event logging (every status change recorded)
 - Automatic timestamp management (started_at, finished_at set correctly)
@@ -451,6 +463,7 @@ The migration maintains **100% backward compatibility** for API responses:
 ### Worker Compatibility
 
 The `_update_job_status()` function signature remains **unchanged**:
+
 - Same parameters: `job_id, status, stage, progress, result, error`
 - Same behavior: Updates job state
 - Enhanced: Now logs events automatically
@@ -465,12 +478,14 @@ The `_update_job_status()` function signature remains **unchanged**:
 #### Create Job Operation
 
 **Before** (psycopg2):
+
 ```
 1 query: INSERT INTO jobs VALUES (...)
 Total: 1 database round trip
 ```
 
 **After** (SQLAlchemy):
+
 ```
 1 query: INSERT INTO job VALUES (...)
 1 query: INSERT INTO job_event VALUES (...)
@@ -482,12 +497,14 @@ Total: 2 database round trips (within same transaction)
 #### Get Job Status Operation
 
 **Before** (psycopg2):
+
 ```
 1 query: SELECT * FROM jobs WHERE id = ?
 Total: 1 database round trip
 ```
 
 **After** (SQLAlchemy):
+
 ```
 1 query: SELECT * FROM job WHERE id = ?
 1 query: SELECT * FROM job_event WHERE job_id = ? ORDER BY ts DESC LIMIT 1
@@ -497,6 +514,7 @@ Total: 2 database round trips
 **Analysis**: Increase (1→2 queries). Can be optimized with eager loading if needed.
 
 **Optimization Opportunity**:
+
 ```python
 # Use joinedload for single query
 job = repo.get_job_with_events(job_id)  # Single query with JOIN
@@ -506,12 +524,14 @@ latest_event = job.events[0] if job.events else None
 #### Update Job Status Operation
 
 **Before** (psycopg2):
+
 ```
 1 query: UPDATE jobs SET ... WHERE id = ?
 Total: 1 database round trip
 ```
 
 **After** (SQLAlchemy):
+
 ```
 1 query: SELECT * FROM job WHERE id = ?
 1 query: UPDATE job SET ... WHERE id = ?
@@ -524,11 +544,13 @@ Total: 3 database round trips (within same transaction)
 ### Connection Pooling
 
 **Before** (psycopg2 connection manager):
+
 - Connection pooling: ❌ Not implemented
 - Each request creates new connection
 - High overhead for concurrent requests
 
 **After** (SQLAlchemy):
+
 - Connection pooling: ✅ Enabled (packages/common/src/heimdex_common/db.py:29-34)
 - Pool size: 5 connections
 - Max overflow: 10 additional connections
@@ -550,6 +572,7 @@ EXPLAIN ANALYZE SELECT * FROM job_event WHERE job_id = '...' ORDER BY ts DESC LI
 ```
 
 **Expected Results**:
+
 - Single job query: Similar performance (simple PK lookup)
 - List jobs query: Improved (better indexes: idx_job_org_status)
 - Concurrent requests: **Significantly improved** (connection pooling)
@@ -583,6 +606,7 @@ make migrate
 ```
 
 **What happens**:
+
 1. Alembic connects to database
 2. Drops old `jobs` table (if exists)
 3. Creates new `job` table with all columns and constraints
@@ -591,6 +615,7 @@ make migrate
 6. Updates `alembic_version` table
 
 **Expected output**:
+
 ```
 INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
 INFO  [alembic.runtime.migration] Will assume transactional DDL.
@@ -606,6 +631,7 @@ psql -h localhost -U heimdex -d heimdex -c "SELECT * FROM alembic_version;"
 ```
 
 **Expected**:
+
 - `job` table exists with all columns
 - `job_event` table exists
 - `alembic_version.version_num = '001_job_ledger_init'`
@@ -713,6 +739,7 @@ make up
 **Issue**: Alembic migration drops old `jobs` table without preserving data.
 
 **Rationale**: Acceptable for development environment. For production, would need:
+
 ```sql
 -- Data migration script (if needed)
 INSERT INTO job (id, org_id, type, status, created_at, updated_at)
@@ -824,6 +851,7 @@ done
 **Current**: Hardcoded `org_id = 00000000-0000-0000-0000-000000000000`
 
 **Future**:
+
 ```python
 # Extract from JWT or API key
 @router.post("/jobs")
@@ -867,6 +895,7 @@ CREATE POLICY job_event_org_isolation ON job_event
 **Current**: 2 queries for job status (job + latest event)
 
 **Optimized**:
+
 ```python
 # In job_repository.py
 def get_job_with_latest_event(self, job_id: uuid.UUID) -> tuple[Job, JobEvent | None]:

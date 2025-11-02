@@ -727,6 +727,7 @@ engine = create_engine(
 ```
 
 Output:
+
 ```
 INFO sqlalchemy.engine.Engine SELECT job.id, job.status, ...
 INFO sqlalchemy.engine.Engine {'job_id': UUID('...')}
@@ -821,11 +822,13 @@ alembic downgrade -1
 3. **Never edit applied migrations** - Create new migration instead
 
 4. **Use descriptive names**:
+
    ```bash
    alembic revision --autogenerate -m "add_asset_table_with_indexes"
    ```
 
 5. **Add data migrations when needed**:
+
    ```python
    def upgrade():
        # Schema change
@@ -875,6 +878,7 @@ alembic upgrade head --sql > migration.sql
 **Cause**: Trying to access lazy-loaded relationships after session closes.
 
 **Solution**:
+
 ```python
 # ✅ Load relationships before session closes
 with get_db() as session:
@@ -890,6 +894,7 @@ with get_db() as session:
 **Cause**: Trying to use session after context manager exits.
 
 **Solution**: Move all database operations inside `with` block:
+
 ```python
 with get_db() as session:
     repo = JobRepository(session)
@@ -902,6 +907,7 @@ with get_db() as session:
 **Cause**: Trying to insert duplicate on unique field (e.g., idempotency_key).
 
 **Solution**: Catch and handle:
+
 ```python
 try:
     job = repo.create_job(...)
@@ -917,6 +923,7 @@ except IntegrityError as e:
 **Cause**: Database connection lost (network issue, timeout, etc.).
 
 **Solution**: Retry with exponential backoff:
+
 ```python
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -933,6 +940,7 @@ def resilient_create_job(...):
 ### Slow Queries
 
 **Diagnosis**:
+
 ```bash
 # Enable slow query logging in PostgreSQL
 ALTER DATABASE heimdex SET log_min_duration_statement = 100; # Log queries > 100ms
@@ -945,6 +953,7 @@ LIMIT 10;
 ```
 
 **Solutions**:
+
 1. Add missing indexes
 2. Use eager loading for relationships
 3. Reduce number of queries (N+1 problem)
