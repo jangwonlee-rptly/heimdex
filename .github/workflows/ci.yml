@@ -43,12 +43,12 @@ jobs:
 
       - name: Run ruff (lint)
         run: |
-          docker run --rm -v $(pwd):/workspace -w /workspace heimdex-dev:ci \
+          docker run --rm -v $(pwd):/workspace -w /workspace -e RUFF_CACHE_DIR=/tmp/ruff_cache heimdex-dev:ci \
             ruff check --output-format=github .
 
       - name: Run ruff (format check)
         run: |
-          docker run --rm -v $(pwd):/workspace -w /workspace heimdex-dev:ci \
+          docker run --rm -v $(pwd):/workspace -w /workspace -e RUFF_CACHE_DIR=/tmp/ruff_cache heimdex-dev:ci \
             ruff format --check .
 
       - name: Run mypy (type check)
