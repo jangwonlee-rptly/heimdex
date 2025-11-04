@@ -2,7 +2,8 @@ services:
   pg:
     image: postgres:17-alpine
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_USER: ${PGUSER}
       POSTGRES_PASSWORD: ${PGPASSWORD}
@@ -52,7 +53,8 @@ services:
       context: ..
       dockerfile: apps/api/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
     command:
       - uvicorn
       - heimdex_api.main:app
@@ -81,7 +83,8 @@ services:
       context: ..
       dockerfile: apps/worker/Dockerfile
     env_file:
-      - .env
+      - path: .env
+        required: false
     command: ["dramatiq", "heimdex_worker.tasks", "heimdex_worker.embeddings", "--processes", "1", "--threads", "2"]
     depends_on:
       pg:
@@ -102,7 +105,8 @@ services:
       context: ..
       dockerfile: Dockerfile.dev
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ..:/workspace:cached
     working_dir: /workspace

@@ -88,6 +88,22 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # PostgreSQL configuration
+      PGUSER: heimdex
+      PGPASSWORD: heimdex
+      PGDATABASE: heimdex
+      PGHOST: pg
+      PGPORT: 5432
+      # Redis configuration
+      REDIS_URL: redis://redis:6379/0
+      # Qdrant configuration
+      QDRANT_URL: http://qdrant:6333
+      # Auth configuration (dev mode for CI)
+      AUTH_PROVIDER: dev
+      DEV_JWT_SECRET: ci-test-secret
+      # Environment
+      HEIMDEX_ENV: local
 
     steps:
       - name: Checkout code
