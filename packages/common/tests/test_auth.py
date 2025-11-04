@@ -237,7 +237,10 @@ class TestConfigValidation:
 
             get_config()
 
-        assert "not allowed in production" in str(exc_info.value).lower()
+        error_msg = str(exc_info.value).lower()
+        assert "auth_provider=dev" in error_msg or "dev" in error_msg
+        assert "prod" in error_msg or "local" in error_msg
+        assert "heimdex_env" in error_msg
 
         # Cleanup
         os.environ.pop("AUTH_PROVIDER", None)

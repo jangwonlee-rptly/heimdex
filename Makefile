@@ -177,16 +177,22 @@ reset:
 	docker compose -f deploy/docker-compose.yml up -d
 
 test-job:
-	@echo "Creating a test job..."
-	@curl -X POST http://localhost:8000/jobs \
+	@echo "Generating dev token..."
+	@TOKEN=$$(docker compose -f deploy/docker-compose.yml exec -T api python3 -c "from heimdex_common.auth import create_dev_token; import uuid; print(create_dev_token('test-user', str(uuid.uuid4()), 'user'))"); \
+	echo "Creating a test job..."; \
+	curl -X POST http://localhost:8000/jobs \
 		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN" \
 		-d '{"type": "mock_process"}' | tee /tmp/heimdex_job.json
 	@echo ""
 
 test-job-fail:
-	@echo "Creating a test job that will fail at 'analyzing' stage..."
-	@curl -X POST http://localhost:8000/jobs \
+	@echo "Generating dev token..."
+	@TOKEN=$$(docker compose -f deploy/docker-compose.yml exec -T api python3 -c "from heimdex_common.auth import create_dev_token; import uuid; print(create_dev_token('test-user', str(uuid.uuid4()), 'user'))"); \
+	echo "Creating a test job that will fail at 'analyzing' stage..."; \
+	curl -X POST http://localhost:8000/jobs \
 		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN" \
 		-d '{"type": "mock_process", "fail_at_stage": "analyzing"}' | tee /tmp/heimdex_job.json
 	@echo ""
 
@@ -195,6 +201,9 @@ check-job:
 		echo "No job ID found. Run 'make test-job' first."; \
 		exit 1; \
 	fi
-	@JOB_ID=$$(cat /tmp/heimdex_job.json | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4); \
+	@echo "Generating dev token..."
+	@TOKEN=$$(docker compose -f deploy/docker-compose.yml exec -T api python3 -c "from heimdex_common.auth import create_dev_token; import uuid; print(create_dev_token('test-user', str(uuid.uuid4()), 'user'))"); \
+	JOB_ID=$$(cat /tmp/heimdex_job.json | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4); \
 	echo "Checking status for job: $$JOB_ID"; \
-	curl -s http://localhost:8000/jobs/$$JOB_ID | python3 -m json.tool
+	curl -s http://localhost:8000/jobs/$$JOB_ID \
+		-H "Authorization: Bearer $$TOKEN" | python3 -m json.tool

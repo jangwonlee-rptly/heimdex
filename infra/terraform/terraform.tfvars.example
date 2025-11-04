@@ -1,22 +1,85 @@
+# Heimdex Terraform Configuration Example
+#
+# ⚠️  INSTRUCTIONS:
+# 1. Copy this file to 'terraform.tfvars' in the same directory
+# 2. Replace all <placeholder> values with your actual configuration
+# 3. Never commit terraform.tfvars to version control (it's gitignored)
+# 4. For sensitive values, consider using GCP Secret Manager or environment variables
+#
+# ✏️  = REQUIRED - Must provide a value
+# 📋 = OPTIONAL - Can use default or customize
+# 🔒 = SENSITIVE - Never commit to version control
+
+# ============================================================================
 # GCP Project Configuration
-project_id = "your-gcp-project-id"
-region     = "us-central1"
+# ============================================================================
+# ✏️  REQUIRED: Your GCP project ID
+project_id = "your-gcp-project-id"           # Example: "heimdex-production-12345"
 
-# Environment
-environment = "dev"
+# 📋 GCP region for all resources
+region = "us-central1"                       # Default: us-central1. Other options: us-east1, europe-west1
 
-# Docker Image Tags
-api_image_tag    = "latest"
-worker_image_tag = "latest"
+# ============================================================================
+# Environment & Deployment
+# ============================================================================
+# ✏️  Deployment environment (affects naming and AUTH_PROVIDER validation)
+environment = "dev"                          # Options: dev | staging | prod
 
-# Scaling (0 for scale-to-zero)
-api_min_instances    = 0
-worker_min_instances = 0
+# 📋 Artifact Registry repository name for Docker images
+artifact_repo = "heimdex"                    # Default: heimdex
 
-# Secrets (DO NOT commit actual secrets!)
-dev_jwt_secret = "change-me-in-production"
+# 📋 Docker image tags for services (typically set by CI/CD)
+api_image_tag    = "latest"                  # Example: "v1.2.3" or "sha-abc123"
+worker_image_tag = "latest"                  # Example: "v1.2.3" or "sha-abc123"
 
-# Cost optimization flags (disabled by default)
-enable_cloudsql      = false
-enable_redis         = false
-enable_vpc_connector = false
+# ============================================================================
+# Authentication Configuration
+# ============================================================================
+# ✏️  CRITICAL: Authentication provider for Cloud Run services
+# - For 'dev' or 'staging': can use "dev" for testing
+# - For 'prod': MUST use "supabase" (enforced by variables.tf validation)
+auth_provider = "dev"                        # Options: dev | supabase
+
+# --- Supabase JWT Configuration (Required if auth_provider = "supabase") ---
+# Uncomment and configure when using Supabase authentication:
+# supabase_project_url = "https://<project-ref>.supabase.co"
+# supabase_jwks_url    = "https://<project-ref>.supabase.co/auth/v1/jwks"
+# auth_issuer          = "https://<project-ref>.supabase.co/auth/v1"
+# auth_audience        = "heimdex"
+
+# --- Dev JWT Secret (Only used when auth_provider = "dev") ---
+# 🔒 This value is stored in GCP Secret Manager
+# ⚠️  WARNING: Change to a strong random value for deployed environments
+# Generate with: openssl rand -base64 32
+dev_jwt_secret = "change-me-in-production"   # 🔒 CHANGE THIS!
+
+# ============================================================================
+# Cloud Run Scaling Configuration
+# ============================================================================
+# Minimum instances (0 = scale-to-zero, saves cost)
+api_min_instances    = 0                     # 📋 Set to 1+ for production to avoid cold starts
+worker_min_instances = 0                     # 📋 Set to 1+ for always-on background processing
+
+# Maximum instances (controls cost and throughput)
+api_max_instances    = 10                    # 📋 Max concurrent API instances
+worker_max_instances = 5                     # 📋 Max concurrent worker instances
+
+# ============================================================================
+# Cloud Run Resource Limits
+# ============================================================================
+# API service resources
+api_cpu_limit    = "1"                       # 📋 CPU cores (0.5, 1, 2, 4, 8)
+api_memory_limit = "512Mi"                   # 📋 Memory (256Mi, 512Mi, 1Gi, 2Gi)
+
+# Worker service resources (typically needs more memory for batch processing)
+worker_cpu_limit    = "1"                    # 📋 CPU cores
+worker_memory_limit = "1Gi"                  # 📋 Memory
+
+# ============================================================================
+# Infrastructure Cost Optimization
+# ============================================================================
+# These managed services are disabled by default to reduce cost
+# Enable only when needed for production workloads
+enable_cloudsql      = false                 # 📋 Enable Cloud SQL PostgreSQL ($$$)
+enable_redis         = false                 # 📋 Enable Memorystore Redis ($$$)
+enable_vpc_connector = false                 # 📋 Enable VPC Connector ($$$)

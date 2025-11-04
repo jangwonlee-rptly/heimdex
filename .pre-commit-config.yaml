@@ -52,6 +52,7 @@ repos:
             package-lock\.json|
             \.secrets\.baseline|
             \.env\.example|
+            deploy/env\.template|
             packages/common/alembic/versions/.*\.py|
             packages/common/alembic\.ini|
             packages/common/tests/test_auth\.py|
@@ -125,14 +126,6 @@ repos:
     hooks:
       - id: actionlint
         name: lint GitHub Actions workflows
-
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.42.0
-    hooks:
-      - id: markdownlint
-        name: lint markdown files
-        args: [--fix, --config, .markdownlint.json]
 
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py

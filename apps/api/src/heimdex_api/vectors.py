@@ -24,7 +24,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import Condition, FieldCondition, Filter, MatchValue
 
 from heimdex_common.auth import RequestContext, verify_jwt
 from heimdex_common.db import get_db
@@ -528,7 +528,9 @@ async def search_vectors(
 
         # Build filters (all filters are AND-ed together)
         # CRITICAL: Always filter by org_id for tenant isolation
-        filter_conditions = [FieldCondition(key="org_id", match=MatchValue(value=ctx.org_id))]
+        filter_conditions: list[Condition] = [
+            FieldCondition(key="org_id", match=MatchValue(value=ctx.org_id))
+        ]
 
         if request.asset_id:
             filter_conditions.append(

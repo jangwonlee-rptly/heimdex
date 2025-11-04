@@ -98,7 +98,7 @@ resource "google_cloud_run_v2_service" "api" {
 
     scaling {
       min_instance_count = var.api_min_instances
-      max_instance_count = 10
+      max_instance_count = var.api_max_instances
     }
 
     containers {
@@ -106,8 +106,8 @@ resource "google_cloud_run_v2_service" "api" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "512Mi"
+          cpu    = var.api_cpu_limit
+          memory = var.api_memory_limit
         }
         cpu_idle          = true
         startup_cpu_boost = false
@@ -120,9 +120,10 @@ resource "google_cloud_run_v2_service" "api" {
 
       env {
         name  = "AUTH_PROVIDER"
-        value = "dev"
+        value = var.auth_provider
       }
 
+      # Dev JWT secret (only used when AUTH_PROVIDER=dev)
       env {
         name = "DEV_JWT_SECRET"
         value_source {
@@ -130,6 +131,39 @@ resource "google_cloud_run_v2_service" "api" {
             secret  = google_secret_manager_secret.dev_jwt_secret.secret_id
             version = "latest"
           }
+        }
+      }
+
+      # Supabase configuration (only used when AUTH_PROVIDER=supabase)
+      dynamic "env" {
+        for_each = var.supabase_jwks_url != null ? [1] : []
+        content {
+          name  = "SUPABASE_JWKS_URL"
+          value = var.supabase_jwks_url
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.supabase_project_url != null ? [1] : []
+        content {
+          name  = "SUPABASE_PROJECT_URL"
+          value = var.supabase_project_url
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.auth_issuer != null ? [1] : []
+        content {
+          name  = "AUTH_ISSUER"
+          value = var.auth_issuer
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.auth_audience != null ? [1] : []
+        content {
+          name  = "AUTH_AUDIENCE"
+          value = var.auth_audience
         }
       }
 
@@ -188,7 +222,7 @@ resource "google_cloud_run_v2_service" "worker" {
 
     scaling {
       min_instance_count = var.worker_min_instances
-      max_instance_count = 5
+      max_instance_count = var.worker_max_instances
     }
 
     containers {
@@ -196,8 +230,8 @@ resource "google_cloud_run_v2_service" "worker" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "1Gi"
+          cpu    = var.worker_cpu_limit
+          memory = var.worker_memory_limit
         }
         cpu_idle          = false
         startup_cpu_boost = false

@@ -213,6 +213,141 @@ if str(job.org_id) != ctx.org_id:
 
 **Cross-Tenant Access**: Returns HTTP 403 Forbidden
 
+## Configuration & Deployment
+
+### Environment Files
+
+Heimdex provides two environment configuration files:
+
+- **`deploy/.env.example`**: Example configuration for local development (git-tracked)
+- **`deploy/env.template`**: Deployment template with detailed guidance (git-tracked)
+
+For local development:
+
+```bash
+cp deploy/.env.example deploy/.env
+# Edit .env with your local values
+```
+
+For production deployment:
+
+```bash
+cp deploy/env.template deploy/.env
+# Replace all <placeholder> values with actual configuration
+# Never commit the filled .env file to version control
+```
+
+### Environment Restrictions
+
+Auth provider selection is restricted by environment for security:
+
+| HEIMDEX_ENV | Allowed AUTH_PROVIDER | Required Config |
+|-------------|----------------------|-----------------|
+| `local`     | `dev` or `supabase`  | DEV_JWT_SECRET (dev) or SUPABASE_* (supabase) |
+| `dev`       | `supabase` only      | SUPABASE_JWKS_URL, AUTH_ISSUER |
+| `staging`   | `supabase` only      | SUPABASE_JWKS_URL, AUTH_ISSUER |
+| `prod`      | `supabase` only      | SUPABASE_JWKS_URL, AUTH_ISSUER |
+
+**Important**: Dev authentication is ONLY allowed when `HEIMDEX_ENV=local`. This restriction is enforced at application startup.
+
+### Production Fail-Fast
+
+The application validates authentication configuration on startup and will **refuse to start** if misconfigured:
+
+**Scenario 1: Dev Auth in Non-Local Environment**
+
+```bash
+HEIMDEX_ENV=prod
+AUTH_PROVIDER=dev
+```
+
+Result:
+
+```
+ValueError: [SECURITY] AUTH_PROVIDER=dev is only allowed when HEIMDEX_ENV=local.
+Current environment: HEIMDEX_ENV=prod
+The application will not start until this is fixed.
+```
+
+**Scenario 2: Missing Supabase Configuration**
+
+```bash
+HEIMDEX_ENV=prod
+AUTH_PROVIDER=supabase
+# Missing SUPABASE_JWKS_URL and AUTH_ISSUER
+```
+
+Result:
+
+```
+ValueError: [CONFIG ERROR] AUTH_PROVIDER=supabase requires the following environment variables:
+  Missing: SUPABASE_JWKS_URL, AUTH_ISSUER
+Example configuration:
+  SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/jwks
+  AUTH_ISSUER=https://<project-ref>.supabase.co/auth/v1
+```
+
+This fail-fast behavior prevents accidentally deploying with insecure authentication settings.
+
+### Local JWT Testing
+
+For local testing of Supabase JWT validation without external dependencies, use the test suite:
+
+```bash
+# Run comprehensive JWT validation tests
+uv run pytest packages/common/tests/test_supabase_jwt.py -v
+
+# Test specific scenarios
+uv run pytest packages/common/tests/test_supabase_jwt.py::TestSupabaseJWTVerification -v
+uv run pytest packages/common/tests/test_supabase_jwt.py::TestProductionFailFast -v
+```
+
+The test suite includes:
+
+- ✅ Valid Supabase JWT acceptance (with local RSA keys)
+- ❌ Invalid issuer rejection
+- ❌ Invalid audience rejection
+- ❌ Expired token rejection
+- ❌ Invalid signature rejection
+- ❌ Missing `kid` header rejection
+- ✅ Dev auth allowed in local environment
+- ❌ Dev auth rejected in dev/staging/prod environments
+- ❌ Production startup failure with misconfigured auth
+
+All tests use locally generated JWKS fixtures and do not require network access.
+
+### Terraform Configuration
+
+For infrastructure deployment, use the Terraform variables example:
+
+```bash
+cd infra/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your GCP project and auth configuration
+```
+
+Key variables for authentication:
+
+```hcl
+# Authentication provider (must be "supabase" for environment="prod")
+auth_provider = "supabase"
+
+# Supabase JWT configuration (required when auth_provider="supabase")
+supabase_project_url = "https://<project-ref>.supabase.co"
+supabase_jwks_url    = "https://<project-ref>.supabase.co/auth/v1/jwks"
+auth_issuer          = "https://<project-ref>.supabase.co/auth/v1"
+auth_audience        = "heimdex"
+```
+
+Terraform enforces the same safety rules:
+
+```hcl
+validation {
+  condition     = !(var.environment == "prod" && var.auth_provider == "dev")
+  error_message = "Production environment requires auth_provider='supabase'"
+}
+```
+
 ## Security Best Practices
 
 ### Secrets Management

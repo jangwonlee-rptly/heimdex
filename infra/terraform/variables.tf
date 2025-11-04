@@ -74,3 +74,79 @@ variable "worker_min_instances" {
   type        = number
   default     = 0
 }
+
+variable "api_max_instances" {
+  description = "Maximum number of API instances"
+  type        = number
+  default     = 10
+}
+
+variable "worker_max_instances" {
+  description = "Maximum number of Worker instances"
+  type        = number
+  default     = 5
+}
+
+variable "api_cpu_limit" {
+  description = "CPU limit for API service (e.g., '1', '2', '4')"
+  type        = string
+  default     = "1"
+}
+
+variable "api_memory_limit" {
+  description = "Memory limit for API service (e.g., '512Mi', '1Gi', '2Gi')"
+  type        = string
+  default     = "512Mi"
+}
+
+variable "worker_cpu_limit" {
+  description = "CPU limit for Worker service (e.g., '1', '2', '4')"
+  type        = string
+  default     = "1"
+}
+
+variable "worker_memory_limit" {
+  description = "Memory limit for Worker service (e.g., '512Mi', '1Gi', '2Gi')"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "auth_provider" {
+  description = "Authentication provider (dev for local/staging, supabase for production)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "supabase"], var.auth_provider)
+    error_message = "auth_provider must be 'dev' or 'supabase'"
+  }
+
+  validation {
+    condition     = !(var.environment == "prod" && var.auth_provider == "dev")
+    error_message = "Production environment (prod) requires auth_provider='supabase' for security. dev auth is not allowed in production."
+  }
+}
+
+variable "supabase_project_url" {
+  description = "Supabase project URL (required when auth_provider=supabase)"
+  type        = string
+  default     = null
+}
+
+variable "supabase_jwks_url" {
+  description = "Supabase JWKS URL for JWT verification (required when auth_provider=supabase)"
+  type        = string
+  default     = null
+}
+
+variable "auth_issuer" {
+  description = "Expected JWT issuer claim (required when auth_provider=supabase)"
+  type        = string
+  default     = null
+}
+
+variable "auth_audience" {
+  description = "Expected JWT audience claim (optional but recommended when auth_provider=supabase)"
+  type        = string
+  default     = null
+}

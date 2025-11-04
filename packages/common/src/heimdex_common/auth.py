@@ -85,8 +85,13 @@ def _get_jwks_client() -> PyJWKClient:
     URL, which contains the public keys required to verify RS256 JWT signatures.
     The client is cached globally to prevent re-fetching the JWKS on every request.
 
+    The PyJWKClient automatically:
+    - Caches JWKS keys by their 'kid' (key ID)
+    - Handles key rotation gracefully
+    - Refetches JWKS if a token's kid is not in the cache
+
     Returns:
-        PyJWKClient: A cached instance of the JWKS client.
+        PyJWKClient: A cached instance of the JWKS client with automatic kid-based caching.
 
     Raises:
         ValueError: If the application is configured for Supabase authentication
@@ -96,7 +101,10 @@ def _get_jwks_client() -> PyJWKClient:
     if _jwks_client is None:
         config = get_config()
         if not config.supabase_jwks_url:
-            raise ValueError("SUPABASE_JWKS_URL not configured for Supabase auth")
+            raise ValueError(
+                "[CONFIG ERROR] SUPABASE_JWKS_URL is required for Supabase authentication "
+                "but not configured. This should have been caught during config validation."
+            )
         _jwks_client = PyJWKClient(config.supabase_jwks_url)
     return _jwks_client
 
@@ -147,10 +155,12 @@ def _verify_supabase_jwt(token: str) -> dict[str, Any]:
     Verifies a JWT from Supabase using an asymmetric RS256 key from JWKS.
 
     This is the production-grade verification method. It involves several steps:
-    1. Fetching the public signing key from the Supabase JWKS endpoint.
-    2. Verifying the token's signature against the fetched public key.
-    3. Validating standard claims: 'exp' (expiration), 'aud' (audience), and
-       'iss' (issuer) to ensure the token is intended for this application.
+    1. Extracting the 'kid' (key ID) from the JWT header
+    2. Fetching the corresponding public signing key from the Supabase JWKS endpoint
+       (with automatic caching by kid)
+    3. Verifying the token's signature against the fetched public key
+    4. Validating standard claims: 'exp' (expiration), 'aud' (audience), and
+       'iss' (issuer) to ensure the token is intended for this application
 
     Args:
         token (str): The JWT token string from the request.
@@ -160,13 +170,22 @@ def _verify_supabase_jwt(token: str) -> dict[str, Any]:
 
     Raises:
         HTTPException (401 Unauthorized): If the token is invalid for any reason,
-            including signature mismatch, expiration, or incorrect audience/issuer.
+            including missing kid, signature mismatch, expiration, or incorrect audience/issuer.
     """
     config = get_config()
 
     try:
         jwks_client = _get_jwks_client()
+        # This call extracts the 'kid' from the JWT header and fetches the corresponding
+        # public key from JWKS. The PyJWKClient automatically caches keys by kid.
         signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+        # Build verification options
+        verify_options = {"verify_exp": True, "verify_iss": True}
+
+        # Only verify audience if it's configured (it's optional but recommended)
+        if config.auth_audience:
+            verify_options["verify_aud"] = True
 
         payload = jwt.decode(
             token,
@@ -174,28 +193,60 @@ def _verify_supabase_jwt(token: str) -> dict[str, Any]:
             algorithms=["RS256"],
             audience=config.auth_audience,
             issuer=config.auth_issuer,
-            options={"verify_exp": True, "verify_aud": True, "verify_iss": True},
+            options=verify_options,
         )
         return dict(payload)
     except jwt.ExpiredSignatureError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
+            detail="Token has expired. Please obtain a new token.",
         ) from e
     except jwt.InvalidAudienceError as e:
+        expected_aud = config.auth_audience or "(not configured)"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid audience claim (expected: {config.auth_audience})",
+            detail=f"Invalid token audience. Expected: {expected_aud}",
         ) from e
     except jwt.InvalidIssuerError as e:
+        expected_iss = config.auth_issuer or "(not configured)"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid issuer claim (expected: {config.auth_issuer})",
+            detail=f"Invalid token issuer. Expected: {expected_iss}",
+        ) from e
+    except jwt.DecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed token. Unable to decode JWT.",
+        ) from e
+    except jwt.InvalidKeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signing key. Token may be signed with wrong key.",
+        ) from e
+    except jwt.InvalidSignatureError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token signature. Token has been tampered with or is invalid.",
+        ) from e
+    except jwt.PyJWKClientError as e:
+        # This covers missing 'kid' in token header and JWKS fetch failures
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                f"Unable to verify token: {e!s}. Token may be missing 'kid' header "
+                "or JWKS endpoint is unreachable."
+            ),
         ) from e
     except jwt.InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {e!s}",
+        ) from e
+    except Exception as e:
+        # Catch-all for unexpected errors (network issues, etc.)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Token verification failed unexpectedly: {e!s}",
         ) from e
 
 

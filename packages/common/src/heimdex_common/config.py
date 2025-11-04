@@ -192,8 +192,13 @@ class HeimdexConfig(BaseSettings):
         alias="AUTH_PROVIDER",
         description=(
             "The authentication provider to use. 'supabase' for production, "
-            "'dev' for local development."
+            "'dev' for local development only. Note: 'dev' is blocked in non-local environments."
         ),
+    )
+    supabase_project_url: str | None = Field(
+        default=None,
+        alias="SUPABASE_PROJECT_URL",
+        description="The base URL of your Supabase project (e.g., https://<ref>.supabase.co).",
     )
     supabase_jwks_url: str | None = Field(
         default=None,
@@ -270,33 +275,56 @@ class HeimdexConfig(BaseSettings):
 
         This method is a Pydantic hook that runs after the model has been
         fully loaded. It enforces complex validation rules that depend on
-        multiple fields.
+        multiple fields, with a focus on production security.
 
         Raises:
             ValueError:
-                - If `AUTH_PROVIDER` is 'dev' in a 'prod' environment, which is a
-                  critical security risk.
+                - If `AUTH_PROVIDER` is 'dev' in a non-local environment (dev/staging/prod),
+                  which is a critical security risk.
                 - If `AUTH_PROVIDER` is 'supabase' but the necessary Supabase-
                   specific configuration variables are missing.
+                - If running in production without proper Supabase configuration.
         """
-        if self.auth_provider == "dev" and self.environment == "prod":
+        # SECURITY: Block dev auth provider outside of local environment
+        if self.auth_provider == "dev" and self.environment != "local":
             raise ValueError(
-                "AUTH_PROVIDER=dev is not allowed in production (HEIMDEX_ENV=prod). "
-                "Use AUTH_PROVIDER=supabase with valid credentials."
+                f"[SECURITY] AUTH_PROVIDER=dev is only allowed when HEIMDEX_ENV=local.\n"
+                f"Current environment: HEIMDEX_ENV={self.environment}\n"
+                f"Action required: Set AUTH_PROVIDER=supabase and configure:\n"
+                f"  - SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/jwks\n"
+                f"  - AUTH_ISSUER=https://<project-ref>.supabase.co/auth/v1\n"
+                f"  - AUTH_AUDIENCE=<your-app-name>\n"
+                f"The application will not start until this is fixed."
             )
 
+        # SECURITY: Enforce Supabase auth in production environments
+        if self.environment == "prod" and self.auth_provider != "supabase":
+            raise ValueError(
+                f"[SECURITY] Production environment requires AUTH_PROVIDER=supabase.\n"
+                f"Current: AUTH_PROVIDER={self.auth_provider}, HEIMDEX_ENV={self.environment}\n"
+                f"Dev authentication is not allowed in production for security reasons.\n"
+                f"The application will not start until this is fixed."
+            )
+
+        # Validate required Supabase fields when using Supabase provider
         if self.auth_provider == "supabase":
             missing_fields = []
             if not self.supabase_jwks_url:
                 missing_fields.append("SUPABASE_JWKS_URL")
-            if not self.auth_audience:
-                missing_fields.append("AUTH_AUDIENCE")
             if not self.auth_issuer:
                 missing_fields.append("AUTH_ISSUER")
+            # AUTH_AUDIENCE is optional but recommended for additional security
+
             if missing_fields:
                 raise ValueError(
-                    f"AUTH_PROVIDER=supabase requires the following fields: "
-                    f"{', '.join(missing_fields)}"
+                    f"[CONFIG ERROR] AUTH_PROVIDER=supabase requires the following "
+                    f"environment variables:\n"
+                    f"  Missing: {', '.join(missing_fields)}\n"
+                    f"Example configuration:\n"
+                    f"  SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/jwks\n"
+                    f"  AUTH_ISSUER=https://<project-ref>.supabase.co/auth/v1\n"
+                    f"  AUTH_AUDIENCE=heimdex  (optional but recommended)\n"
+                    f"See deploy/env.template for full configuration guidance."
                 )
 
     def get_database_url(self, driver: str = "postgresql+psycopg2") -> str:
